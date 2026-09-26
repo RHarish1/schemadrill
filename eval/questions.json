@@ -1,0 +1,10 @@
+[
+    {
+        "db": "chinook",
+        "question": "List the names of all artists."
+    },
+    {
+        "db": "chinook",
+        "question": "How many tracks are on each album?"
+    }
+]
