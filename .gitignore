@@ -1,0 +1,9 @@
+.env
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+.ruff_cache/
+.mypy_cache/
+*.jsonl
+wheels/
