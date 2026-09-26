@@ -1,10 +1,27 @@
 [
     {
         "db": "chinook",
-        "question": "List the names of all artists."
+        "question": "List the names of all artists.",
+        "gold_sql": "SELECT name FROM chinook.artist ORDER BY artist_id;"
     },
     {
         "db": "chinook",
-        "question": "How many tracks are on each album?"
+        "question": "How many tracks are on each album?",
+        "gold_sql": "SELECT album.title, COUNT(track.track_id) AS track_count FROM chinook.album AS album LEFT JOIN chinook.track AS track ON track.album_id = album.album_id GROUP BY album.album_id, album.title ORDER BY album.album_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "How many artists are there?",
+        "gold_sql": "SELECT COUNT(*) AS artist_count FROM chinook.artist;"
+    },
+    {
+        "db": "chinook",
+        "question": "How many albums does each artist have?",
+        "gold_sql": "SELECT artist.name, COUNT(album.album_id) AS album_count FROM chinook.artist AS artist LEFT JOIN chinook.album AS album ON album.artist_id = artist.artist_id GROUP BY artist.artist_id, artist.name ORDER BY artist.artist_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "Show the three longest tracks.",
+        "gold_sql": "SELECT name, milliseconds FROM chinook.track ORDER BY milliseconds DESC LIMIT 3;"
     }
 ]
