@@ -20,6 +20,7 @@ def run_pipeline(
     settings: Settings | None = None,
     retrieve: Callable[..., list] = retrieve_schema,
     generate_sql: Callable[[list[dict[str, str]]], object] = generate,
+    pre_execute_check: Callable[[str], None] | None = None,
 ) -> QueryResult:
     settings = settings or get_settings()
     blocks = retrieve(question, db, settings.top_k)
@@ -52,6 +53,8 @@ def run_pipeline(
 
     try:
         with readonly_connection() as connection:
+            if pre_execute_check:
+                pre_execute_check(sql)
             dataframe = execute(connection, sql, settings.max_result_rows)
     except RowCapExceeded as error:
         messages.append(feedback("row_cap", str(error)))
@@ -61,6 +64,8 @@ def run_pipeline(
             validate_sql(sql)
             with readonly_connection() as connection:
                 dry_run(connection, sql)
+                if pre_execute_check:
+                    pre_execute_check(sql)
                 dataframe = execute(connection, sql, settings.max_result_rows)
             attempts_used += 1
         except (ParseError, PsycopgError, RowCapExceeded) as error:
