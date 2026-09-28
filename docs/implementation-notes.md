@@ -114,7 +114,7 @@ The evaluator tests cover unordered rows, duplicate preservation, NULL values, n
 
 ## Remaining Limitations
 
-- Query-efficiency metrics such as execution time, plan cost, rows scanned, and index usage are not yet collected by the evaluator. The evaluation models remain extensible for those fields.
+- Gold and generated wall-clock SQL execution times are collected. Plan cost, rows scanned, index usage, and other query-plan metrics are not yet collected; the evaluation models remain extensible for those fields.
 - Qdrant and FAISS provider implementations are not wired yet; only their configuration boundary exists.
 - The comparator's unordered/multiset/column-order policy is explicit and tested, but should still be checked against the exact BIRD or Spider reference evaluator before reporting those benchmark numbers as official.
 - A first-pass error categorizer now labels common timeout, missing-object, missing-table, missing-column, invalid-function, type, connection, and other execution errors. Driver-specific SQLSTATE mapping remains a future refinement.
@@ -140,3 +140,11 @@ Final container verification passed locally:
 - `python -m eval.benchmark` passed with the pgvector extension, HNSW index, and Chinook tables detected;
 - `import ingest.schema_ingest` passed inside the image;
 - the API container reached healthy state and `/health` returned `{"status":"ok"}`.
+
+The five-case packaged Chinook sanity run also returned `execution_accuracy=1.0`, `ast_match_rate=1.0`, and successful execution for both gold and generated SQL when the gold SQL was used as the controlled generated input. This validates the evaluator and database fixture independently of Gemini generation.
+
+## Dataset And CI Split
+
+The dataset-oriented entry point is `python -m evaluation.runner`. Chinook cases live in `evaluation/chinook/cases.json` and remain the fast deterministic regression set. BIRD Mini-Dev is documented under `evaluation/bird/` as an opt-in dataset; its data is not committed. The older `eval/` package remains the implementation and compatibility layer; `evaluation/` is the dataset-facing namespace.
+
+Normal CI runs unit/evaluator tests, Docker/pgvector infrastructure checks, and `evaluation.runner --gold-as-generated` for the seeded Chinook cases. That smoke test validates evaluator correctness without requiring Gemini credentials. A live generation benchmark should be run manually or nightly once credentials, model availability, and a regression threshold are configured; BIRD is intentionally not a required push check yet.

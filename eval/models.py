@@ -19,6 +19,8 @@ class SQLEvalResult(BaseModel):
     generated_row_count: int | None = None
     gold_columns: list[str] | None = None
     generated_columns: list[str] | None = None
+    gold_execution_time_ms: float | None = None
+    generated_execution_time_ms: float | None = None
 
 
 class SQLEvalSummary(BaseModel):
