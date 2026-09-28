@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     model_name: str = "gemini-3.1-flash-lite"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    retrieval_backend: str = "pgvector"
     top_k: int = 3
     max_retries: int = 3
     max_result_rows: int = 1000

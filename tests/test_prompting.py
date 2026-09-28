@@ -1,5 +1,5 @@
-from app.models import DDLBlock
-from app.prompting import build_messages, feedback
+from app.models import DDLBlock, RetryState
+from app.prompting import build_messages, estimate_prompt_tokens, feedback, messages_for_retry
 
 
 def test_feedback_templates_are_distinct():
@@ -20,3 +20,27 @@ def test_gemini_prompt_is_logged(caplog):
 
     assert "gemini_prompt" in caplog.text
     assert "List artists" in caplog.text
+
+
+def test_retry_prompt_token_count_does_not_accumulate_history():
+    ddl = [DDLBlock(schema_name="chinook", table_name="artist", ddl_text="CREATE TABLE artist;")]
+    attempt_one = messages_for_retry(
+        RetryState(
+            question="List artists",
+            retrieved_ddl=ddl,
+            attempt=1,
+            last_sql="SELECT foo FROM artist",
+            last_error="column does not exist",
+        )
+    )
+    attempt_three = messages_for_retry(
+        RetryState(
+            question="List artists",
+            retrieved_ddl=ddl,
+            attempt=3,
+            last_sql="SELECT bar FROM artist",
+            last_error="column does not exist",
+        )
+    )
+
+    assert estimate_prompt_tokens(attempt_three) <= estimate_prompt_tokens(attempt_one)

@@ -9,6 +9,15 @@ from app.models import SqlResponse
 logger = logging.getLogger(__name__)
 
 
+def count_prompt_tokens(messages: list[dict[str, str]]) -> int:
+    from google import genai
+
+    settings = get_settings()
+    client = genai.Client(api_key=settings.gemini_api_key)
+    result = client.models.count_tokens(model=settings.model_name, contents=messages)
+    return int(result.total_tokens)
+
+
 def generate(messages: list[dict[str, str]]) -> SqlResponse:
     settings = get_settings()
     if not settings.gemini_api_key:

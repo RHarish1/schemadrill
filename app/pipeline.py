@@ -7,9 +7,9 @@ from app.config import Settings, get_settings
 from app.db import readonly_connection
 from app.executor import dry_run, execute
 from app.llm_client import generate
-from app.models import QueryResult, RowCapExceeded
-from app.prompting import build_messages, feedback
-from app.retrieval import retrieve_schema
+from app.models import QueryResult, RetryState, RowCapExceeded
+from app.prompting import feedback, messages_for_retry
+from app.retrieval import get_retrieval_provider
 from app.sql_guard import validate_sql
 
 
@@ -18,26 +18,30 @@ def run_pipeline(
     db: str,
     *,
     settings: Settings | None = None,
-    retrieve: Callable[..., list] = retrieve_schema,
+    retrieve: Callable[..., list] | None = None,
     generate_sql: Callable[[list[dict[str, str]]], object] = generate,
     pre_execute_check: Callable[[str], None] | None = None,
 ) -> QueryResult:
     settings = settings or get_settings()
-    blocks = retrieve(question, db, settings.top_k)
-    messages = build_messages(blocks, question)
+    retrieve_fn = retrieve or get_retrieval_provider(settings).retrieve
+    blocks = retrieve_fn(question, db, settings.top_k)
+    state = RetryState(question=question, retrieved_ddl=blocks, attempt=1)
     last_error = "unknown pipeline failure"
     sql = ""
     attempts_used = 0
 
     for attempt in range(1, settings.max_retries + 1):
         attempts_used = attempt
-        response = generate_sql(messages)
+        state.attempt = attempt
+        response = generate_sql(messages_for_retry(state))
         sql = response.sql
+        state.last_sql = sql
         try:
             validate_sql(sql)
         except ParseError as error:
             last_error = str(error)
-            messages.append(feedback("parse_error", last_error))
+            feedback("parse_error", last_error)
+            state.last_error = last_error
             continue
 
         try:
@@ -45,7 +49,8 @@ def run_pipeline(
                 dry_run(connection, sql)
         except PsycopgError as error:
             last_error = str(error).splitlines()[0]
-            messages.append(feedback("dry_run_error", last_error))
+            feedback("dry_run_error", last_error)
+            state.last_error = last_error
             continue
         break
     else:
@@ -57,8 +62,10 @@ def run_pipeline(
                 pre_execute_check(sql)
             dataframe = execute(connection, sql, settings.max_result_rows)
     except RowCapExceeded as error:
-        messages.append(feedback("row_cap", str(error)))
-        response = generate_sql(messages)
+        state.attempt += 1
+        state.last_error = str(error)
+        feedback("row_cap", state.last_error)
+        response = generate_sql(messages_for_retry(state))
         sql = response.sql
         try:
             validate_sql(sql)
