@@ -2,7 +2,6 @@ from collections.abc import Callable
 from typing import Protocol
 
 from psycopg import Error as PsycopgError
-from sqlglot.errors import ParseError
 
 from app.config import Settings, get_settings
 from app.db import readonly_connection
@@ -11,7 +10,7 @@ from app.llm_client import generate
 from app.models import QueryResult, RetryState, RowCapExceeded, SqlResponse
 from app.prompting import feedback, messages_for_retry
 from app.retrieval import get_retrieval_provider
-from app.sql_guard import validate_sql
+from app.sql_guard import default_guard_config, guard_sql
 
 
 class PipelineStage(Protocol):
@@ -36,14 +35,27 @@ def build_pipeline_stages(
     generate_sql: Callable[[list[dict[str, str]]], object],
     pre_execute_check: Callable[[str], None] | None,
     result: dict[str, object],
+    allowed_tables: set[str] | None = None,
 ) -> list[PipelineStage]:
     retrieve_fn = retrieve or get_retrieval_provider(settings).retrieve
     retrieval_complete = False
+    authorized_tables = (
+        {table.lower() for table in allowed_tables} if allowed_tables is not None else None
+    )
 
     def retrieval_stage(state: RetryState) -> RetryState:
-        nonlocal retrieval_complete
+        nonlocal authorized_tables, retrieval_complete
         if not retrieval_complete:
             state.retrieved_ddl = retrieve_fn(question, db, settings.top_k)
+            if authorized_tables is None:
+                authorized_tables = {
+                    table_name
+                    for block in state.retrieved_ddl
+                    for table_name in (
+                        f"{block.schema_name}.{block.table_name}".lower(),
+                        block.table_name.lower(),
+                    )
+                }
             retrieval_complete = True
         return state
 
@@ -53,10 +65,15 @@ def build_pipeline_stages(
         return state
 
     def gate_stage(state: RetryState) -> RetryState:
-        try:
-            validate_sql(state.last_sql or "")
-        except ParseError as error:
-            raise _RetryStage("parse_error", str(error)) from error
+        guard_result = guard_sql(
+            state.last_sql or "",
+            authorized_tables or set(),
+            default_guard_config(settings.max_result_rows),
+        )
+        if not guard_result.allowed:
+            kind = "parse_error" if guard_result.statement_type == "UNKNOWN" else "sql_guard"
+            raise _RetryStage(kind, guard_result.user_facing_message or "Security policy rejection")
+        state.last_sql = guard_result.sql
 
         try:
             with readonly_connection() as connection:
@@ -90,12 +107,20 @@ def run_pipeline(
     retrieve: Callable[..., list] | None = None,
     generate_sql: Callable[[list[dict[str, str]]], object] = generate,
     pre_execute_check: Callable[[str], None] | None = None,
+    allowed_tables: set[str] | None = None,
 ) -> QueryResult:
     settings = settings or get_settings()
     state = RetryState(question=question, attempt=1)
     result: dict[str, object] = {}
     stages = build_pipeline_stages(
-        question, db, settings, retrieve, generate_sql, pre_execute_check, result
+        question,
+        db,
+        settings,
+        retrieve,
+        generate_sql,
+        pre_execute_check,
+        result,
+        allowed_tables,
     )
 
     for attempt in range(1, settings.max_retries + 1):

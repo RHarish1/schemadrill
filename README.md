@@ -10,7 +10,7 @@ The repository currently implements the v0 runtime end to end: Docker Compose, P
 
 The evaluation harness distinguishes generated-query execution success, result-based Execution Accuracy (EX), AST similarity, result metadata, and SQL execution timing. Chinook is the fast deterministic regression dataset. BIRD Mini-Dev is an opt-in evaluation dataset and is not run on every push.
 
-This is still a deliberately small v0 benchmark: the checked-in dataset is deterministic Chinook smoke data, not the planned multi-database Spider/BIRD subset. RBAC enforcement, stronger SQL safety rules, result/golden-table comparison, judge-model calls, caching, tracing, and frontend work remain outside v0.
+This is still a deliberately small v0 benchmark: the checked-in dataset is deterministic Chinook smoke data, not the planned multi-database Spider/BIRD subset. Database RBAC remains the final boundary; application-level SQL guard enforcement, result comparison, judge-model calls, caching, tracing, and frontend work are at different maturity levels and are documented separately.
 
 ## Run Locally
 
@@ -47,8 +47,8 @@ Open Swagger at <http://localhost:8000/docs> or call the API:
 
 ```sh
 curl -X POST http://localhost:8000/query \
-	-H 'Content-Type: application/json' \
-	-d '{"db":"chinook","question":"List the names of all artists."}'
+ -H 'Content-Type: application/json' \
+ -d '{"db":"chinook","question":"List the names of all artists."}'
 ```
 
 View retrieval similarity scores, the exact Gemini prompt, and generated SQL:
@@ -57,7 +57,7 @@ View retrieval similarity scores, the exact Gemini prompt, and generated SQL:
 docker compose logs -f app
 ```
 
-The API uses a read-only Postgres role. v0 intentionally keeps `sql_guard` to parse validity; stronger allowlists and LIMIT injection are deferred to v1.
+The API uses a read-only Postgres role. `sql_guard` is a deterministic defense-in-depth boundary before `EXPLAIN`: only single SELECT statements are allowed, physical tables are checked against the retrieved/RBAC scope, privileged PostgreSQL functions are blocked, and a configured maximum LIMIT is injected or enforced. PostgreSQL RBAC remains the final security boundary.
 
 ## Prompt Benchmark
 
@@ -65,8 +65,8 @@ Run every prompt sequentially through retrieval, Gemini, SQL validation, the off
 
 ```sh
 docker compose exec app python -m eval.run_benchmark \
-	--questions eval/questions.json \
-	--output /tmp/schemadrill-results.jsonl
+ --questions eval/questions.json \
+ --output /tmp/schemadrill-results.jsonl
 ```
 
 The command prints each prompt result immediately and reports result-based Execution Accuracy, execution success, AST match rate, result metadata, and timing. AST match remains a diagnostic and is not used as EX. Run a smaller check with:
@@ -91,24 +91,24 @@ Run the five deterministic Chinook cases locally after starting the database and
 
 ```sh
 docker compose exec app python -m evaluation.runner \
-	--questions evaluation/chinook/cases.json \
-	--dataset chinook \
-	--output /tmp/schemadrill-chinook.jsonl
+ --questions evaluation/chinook/cases.json \
+ --dataset chinook \
+ --output /tmp/schemadrill-chinook.jsonl
 ```
 
 Run the evaluator/database smoke check without Gemini:
 
 ```sh
 docker compose run --rm app python -m evaluation.runner \
-	--gold-as-generated --dataset chinook
+ --gold-as-generated --dataset chinook
 ```
 
 This controlled check should report 100% EX and AST match for the seeded gold cases. It validates the evaluator and database fixture, not model quality. BIRD Mini-Dev belongs in a manual/nightly run once its local dataset and reference semantics are configured:
 
 ```sh
 python -m evaluation.runner \
-	--questions evaluation/bird/mini_dev.json \
-	--dataset bird-mini-dev
+ --questions evaluation/bird/mini_dev.json \
+ --dataset bird-mini-dev
 ```
 
 ## PostgreSQL
