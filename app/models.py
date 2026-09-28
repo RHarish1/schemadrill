@@ -26,6 +26,14 @@ class DDLBlock(BaseModel):
     ddl_text: str
 
 
+class RetryState(BaseModel):
+    question: str = Field(min_length=1)
+    retrieved_ddl: list[DDLBlock] = Field(default_factory=list)
+    attempt: int = Field(ge=1)
+    last_sql: str | None = None
+    last_error: str | None = None
+
+
 class PipelineFailure(Exception):
     def __init__(self, reason: str, attempts: int) -> None:
         super().__init__(reason)
