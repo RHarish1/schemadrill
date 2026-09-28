@@ -148,3 +148,15 @@ The five-case packaged Chinook sanity run also returned `execution_accuracy=1.0`
 The dataset-oriented entry point is `python -m evaluation.runner`. Chinook cases live in `evaluation/chinook/cases.json` and remain the fast deterministic regression set. BIRD Mini-Dev is documented under `evaluation/bird/` as an opt-in dataset; its data is not committed. The older `eval/` package remains the implementation and compatibility layer; `evaluation/` is the dataset-facing namespace.
 
 Normal CI runs unit/evaluator tests, Docker/pgvector infrastructure checks, and `evaluation.runner --gold-as-generated` for the seeded Chinook cases. That smoke test validates evaluator correctness without requiring Gemini credentials. A live generation benchmark should be run manually or nightly once credentials, model availability, and a regression threshold are configured; BIRD is intentionally not a required push check yet.
+
+## Step 7 SQL Guard
+
+`app/sql_guard.py` is deterministic and has no LLM, embedding, retrieval, or network dependency. It uses only the generated SQL, the PostgreSQL AST, the supplied allowed-table set, and `SQLGuardConfig`.
+
+The guard rejects multiple statements and every non-SELECT statement. It extracts physical tables recursively through joins, subqueries, CTEs, nested CTEs, EXISTS, IN, and UNION nodes, while excluding CTE aliases themselves. It inspects AST function nodes against the documented PostgreSQL file, large-object, and dblink denylist, so blocked names in string literals do not trigger false positives.
+
+Safe statements receive an AST-based maximum LIMIT. Existing limits/fetch counts within policy are preserved; excessive or non-literal limits are rejected. Guard output is a Pydantic `SQLGuardResult` containing the transformed SQL, statement type, referenced tables, blocked functions, rejection reason, and limit-injected flag.
+
+The pipeline passes retrieved DDL tables as the default scope and accepts an explicit `allowed_tables` override. Internal rejection details remain available in the structured result, while user-facing authorization failures use `You do not have access to the requested data.` without revealing restricted object names.
+
+The adversarial suite in `tests/test_sql_guard.py` covers 24 cases across statement allowlisting, multiple statements, nested authorization bypasses, blocked PostgreSQL capabilities, legitimate queries, literals, LIMIT policy, determinism, and end-to-end authorization-safe responses.

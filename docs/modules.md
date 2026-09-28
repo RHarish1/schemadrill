@@ -34,7 +34,7 @@ evaluation.runner
 | `app/retrieval.py` | Retrieval provider abstraction and pgvector implementation | `RetrievalProvider`, `get_retrieval_provider()` | Embeds the question and queries `schema_embeddings`; Qdrant/FAISS are explicit v0-unavailable providers |
 | `app/embedding.py` | Config-selected sentence-transformer loading and embedding | `embed_passage()`, `embed_query()` | Loads and caches the configured embedding model; CPU model loading can be expensive |
 | `app/db.py` | Shared PostgreSQL connection-pool boundary | `readonly_connection()`, `close_pool()` | Opens pooled connections and sets transactions read-only |
-| `app/sql_guard.py` | PostgreSQL syntax parsing | `validate_sql()` | Raises `sqlglot` parse errors; it is not a complete SQL security policy |
+| `app/sql_guard.py` | Deterministic SQL security boundary | `guard_sql()`, `SQLGuardResult`, `default_guard_config()` | Parses PostgreSQL ASTs; enforces single SELECT, RBAC table scope, blocked functions, and AST-based LIMIT policy |
 | `app/executor.py` | PostgreSQL dry-run and bounded result execution | `dry_run()`, `execute()` | Runs `EXPLAIN`, fetches at most `max_result_rows + 1`, raises `RowCapExceeded`, returns a DataFrame |
 
 ## Pipeline Stages
@@ -47,6 +47,8 @@ evaluation.runner
 4. **Execution:** runs the query with a row cap. Row-cap errors retry; other database errors are terminal.
 
 Every stage receives and returns a Pydantic-validated `RetryState`. Retrieval remains fixed; `last_sql` and `last_error` are replaced rather than appended.
+
+The gate invokes `guard_sql()` before PostgreSQL `EXPLAIN`. Guard diagnostics may contain internal table/function details for logs and tracing, but pipeline failures return generic security or authorization messages so restricted table names are not disclosed.
 
 ## Ingestion
 

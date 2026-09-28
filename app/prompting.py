@@ -59,6 +59,10 @@ def estimate_prompt_tokens(messages: list[dict[str, str]]) -> int:
 
 def feedback(kind: str, detail: str) -> dict[str, str]:
     templates = {
+        "sql_guard": (
+            "The generated SQL was rejected by the deterministic security policy. "
+            "Return a corrected SQL query only."
+        ),
         "parse_error": (
             "The generated SQL could not be parsed as PostgreSQL. Return a corrected SQL query "
             "only. Parser detail: {detail}"

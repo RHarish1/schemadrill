@@ -53,7 +53,7 @@ def test_parse_error_retries_then_executes(monkeypatch):
     assert result.status == "success"
     assert result.attempts == 2
     assert feedback_messages == ["parse_error"]
-    assert executed == ["SELECT 1"]
+    assert executed == ["SELECT 1 LIMIT 1000"]
 
 
 def test_dry_run_error_retries_with_specific_feedback(monkeypatch):
@@ -124,8 +124,8 @@ def test_row_cap_gets_one_regeneration_and_checks_before_execute(monkeypatch):
 
     assert result.status == "success"
     assert result.attempts == 2
-    assert checks == ["SELECT 1", "SELECT 1 LIMIT 1"]
-    assert executions == ["SELECT 1", "SELECT 1 LIMIT 1"]
+    assert checks == ["SELECT 1 LIMIT 1000", "SELECT 1 LIMIT 1"]
+    assert executions == ["SELECT 1 LIMIT 1000", "SELECT 1 LIMIT 1"]
 
 
 def test_real_execution_error_does_not_regenerate(monkeypatch):
@@ -154,7 +154,7 @@ def _connection():
 
 
 def _dry_run_fails_once(connection, sql):
-    if sql == "SELECT missing":
+    if sql.startswith("SELECT missing"):
         raise PsycopgError("missing column")
 
 

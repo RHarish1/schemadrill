@@ -20,6 +20,22 @@ class QueryResult(BaseModel):
     reason: str | None = None
 
 
+class SQLGuardConfig(BaseModel):
+    max_limit: int = Field(default=1000, gt=0)
+    blocked_functions: set[str] = Field(default_factory=set)
+
+
+class SQLGuardResult(BaseModel):
+    allowed: bool
+    sql: str | None = None
+    statement_type: str
+    referenced_tables: list[str] = Field(default_factory=list)
+    blocked_functions: list[str] = Field(default_factory=list)
+    rejection_reason: str | None = None
+    user_facing_message: str | None = None
+    limit_injected: bool = False
+
+
 class DDLBlock(BaseModel):
     schema_name: str
     table_name: str
@@ -45,4 +61,4 @@ class RowCapExceeded(Exception):
     pass
 
 
-FeedbackKind = Literal["parse_error", "dry_run_error", "row_cap"]
+FeedbackKind = Literal["parse_error", "dry_run_error", "row_cap", "sql_guard"]
