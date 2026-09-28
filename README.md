@@ -2,11 +2,13 @@
 
 SchemaDrill is a retrieval-augmented PostgreSQL text-to-SQL service. It embeds one DDL block per table into pgvector, retrieves the top three tables for a question, sends the retrieved schema and question to Gemini, validates the generated SQL, and executes it with a bounded retry loop.
 
+See [docs/modules.md](docs/modules.md) for the module-by-module ownership map and [docs/implementation-notes.md](docs/implementation-notes.md) for the implementation decisions and troubleshooting history.
+
 ## Current v0 Status
 
 The repository currently implements the v0 runtime end to end: Docker Compose, PostgreSQL/pgvector, local `bge-small-en-v1.5` retrieval, structured Gemini SQL generation, PostgreSQL parsing and `EXPLAIN` retries, read-only execution, row-cap handling, and Markdown result generation.
 
-The evaluation harness is also present. It runs the checked-in Chinook cases, compares the parsed generated SQL AST with each gold SQL statement immediately before execution, and reports SQL accuracy separately from execution success. The result table is generated and stored in the run output, but its contents are intentionally not compared yet.
+The evaluation harness distinguishes generated-query execution success, result-based Execution Accuracy (EX), AST similarity, result metadata, and SQL execution timing. Chinook is the fast deterministic regression dataset. BIRD Mini-Dev is an opt-in evaluation dataset and is not run on every push.
 
 This is still a deliberately small v0 benchmark: the checked-in dataset is deterministic Chinook smoke data, not the planned multi-database Spider/BIRD subset. RBAC enforcement, stronger SQL safety rules, result/golden-table comparison, judge-model calls, caching, tracing, and frontend work remain outside v0.
 
@@ -67,18 +69,46 @@ docker compose exec app python -m eval.run_benchmark \
 	--output /tmp/schemadrill-results.jsonl
 ```
 
-The command prints each prompt result immediately and ends with execution accuracy, SQL accuracy, mean latency, and total runtime. Execution accuracy currently means that the pipeline returned a successful execution; SQL accuracy means that the parsed generated SQL matched the checked-in gold SQL. No returned table values are compared yet. Run a smaller check with:
+The command prints each prompt result immediately and reports result-based Execution Accuracy, execution success, AST match rate, result metadata, and timing. AST match remains a diagnostic and is not used as EX. Run a smaller check with:
 
 ```sh
 docker compose exec app python -m eval.run_benchmark --db chinook --limit 1
 ```
 
-Each JSONL record includes `gold_sql`, `generated_sql`, `sql_match`, `judge_reason`, and the generated `table_markdown`. The judge is deterministic and offline: it parses both PostgreSQL statements with `sqlglot` and compares their ASTs. It does not block execution when SQL differs.
+Each JSONL record includes `gold_sql`, `generated_sql`, `execution_match`, `ast_match`, execution errors/categories, row counts, columns, and gold/generated SQL execution times. The result comparator preserves duplicate rows, handles NULL and numeric representations, ignores row order, and keeps column order significant.
 
 The legacy entry point delegates to the same runner:
 
 ```sh
 docker compose exec app python -m eval.run_eval --questions eval/questions.json
+```
+
+## Dataset Evaluation
+
+Use `evaluation/` for dataset-facing commands and cases. The older `eval/` package remains the implementation and backward-compatible CLI location.
+
+Run the five deterministic Chinook cases locally after starting the database and ingesting the schema:
+
+```sh
+docker compose exec app python -m evaluation.runner \
+	--questions evaluation/chinook/cases.json \
+	--dataset chinook \
+	--output /tmp/schemadrill-chinook.jsonl
+```
+
+Run the evaluator/database smoke check without Gemini:
+
+```sh
+docker compose run --rm app python -m evaluation.runner \
+	--gold-as-generated --dataset chinook
+```
+
+This controlled check should report 100% EX and AST match for the seeded gold cases. It validates the evaluator and database fixture, not model quality. BIRD Mini-Dev belongs in a manual/nightly run once its local dataset and reference semantics are configured:
+
+```sh
+python -m evaluation.runner \
+	--questions evaluation/bird/mini_dev.json \
+	--dataset bird-mini-dev
 ```
 
 ## PostgreSQL
@@ -99,9 +129,10 @@ docker compose config
 docker compose up -d db
 docker compose exec app python -m ingest.schema_ingest chinook
 docker compose run --rm app python -m eval.benchmark
+docker compose run --rm app python -m evaluation.runner --gold-as-generated --dataset chinook
 docker compose down -v
 ```
 
 ## CI
 
-GitHub Actions runs Ruff, Black, pytest, Docker Compose validation, Postgres/pgvector checks, and the vector benchmark. Docker and CI install CPU-only PyTorch; the local `wheels/` cache is intentionally ignored because it is not needed for the build and is too large for a normal GitHub commit.
+GitHub Actions runs Ruff, Black, pytest, Docker Compose validation, Postgres/pgvector checks, the vector benchmark, and the credential-free Chinook evaluator smoke test. The smoke test validates EX, AST, and result execution against the seeded gold SQL without calling Gemini. BIRD Mini-Dev is intentionally excluded from push/PR CI and should run manually or nightly.

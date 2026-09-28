@@ -49,6 +49,8 @@ jobs:
           docker compose logs db
           exit 1
       - run: docker compose run --rm app python -m eval.benchmark
+      - name: Run Chinook evaluator smoke test
+        run: docker compose run --rm app python -m evaluation.runner --gold-as-generated --dataset chinook
       - run: docker compose up -d app
       - name: Check API health
         run: |
