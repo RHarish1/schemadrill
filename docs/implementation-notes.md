@@ -119,3 +119,24 @@ The evaluator tests cover unordered rows, duplicate preservation, NULL values, n
 - The comparator's unordered/multiset/column-order policy is explicit and tested, but should still be checked against the exact BIRD or Spider reference evaluator before reporting those benchmark numbers as official.
 - A first-pass error categorizer now labels common timeout, missing-object, missing-table, missing-column, invalid-function, type, connection, and other execution errors. Driver-specific SQLSTATE mapping remains a future refinement.
 - The benchmark's system metrics such as LLM tokens, latency, retries, and retrieval latency remain separate from SQL correctness and are not folded into EX.
+
+## Docker Build Failure And Fix
+
+The first Docker CI attempts failed while pip streamed the large CPU Torch wheel from the PyTorch index. Increasing pip retries and timeouts did not solve the underlying broken connection; the failure moved between Torch and the later requirements install.
+
+The fix was to make dependency installation offline and deterministic:
+
+1. Populate the local `wheels/` cache with `pip download`, including all transitive requirements and the CPU Torch wheel.
+2. Stop excluding `wheels/` from the Docker build context.
+3. Copy `wheels/` into the image and install with `pip --no-index --find-links=/app/wheels`.
+4. Add the same wheel-download step to CI before `docker compose build`, because the cache is intentionally ignored by Git and is generated in fresh CI workspaces.
+
+The Dockerfile already copied `app/`, `ingest/`, `eval/`, and `scripts/`; this preserved the earlier `ModuleNotFoundError: No module named 'ingest'` fix. Compose still publishes host port 8000. A separate Quarry port conflict was not present during final verification; when another service owns that port, stop that service or change only the host side of the mapping.
+
+Final container verification passed locally:
+
+- offline wheel resolution passed;
+- Docker image build passed;
+- `python -m eval.benchmark` passed with the pgvector extension, HNSW index, and Chinook tables detected;
+- `import ingest.schema_ingest` passed inside the image;
+- the API container reached healthy state and `/health` returned `{"status":"ok"}`.

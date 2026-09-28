@@ -3,10 +3,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
+COPY wheels ./wheels
 
-RUN pip install --no-cache-dir --retries 10 --timeout 120 \
-    --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
+RUN pip install --no-cache-dir --no-index --find-links=/app/wheels -r requirements.txt
 
 COPY app ./app
 COPY ingest ./ingest
