@@ -25,11 +25,12 @@ def run_evaluator_smoke(questions_path: str, dataset: str) -> dict[str, Any]:
     summary = {
         "dataset": dataset,
         "total_examples": len(results),
-        "execution_accuracy": sum(result.execution_match for result in results) / len(results),
+        "result_set_accuracy": sum(result.result_match for result in results) / len(results),
         "execution_success_rate": sum(result.generated_executed for result in results)
         / len(results),
         "ast_match_rate": sum(result.ast_match is True for result in results) / len(results),
     }
+    summary["execution_accuracy"] = summary["result_set_accuracy"]
     print(json.dumps(summary, sort_keys=True))
     return summary
 
