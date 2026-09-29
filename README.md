@@ -181,7 +181,7 @@ pip install -r requirements-dev.txt
 ruff check .
 black --check .
 pytest -q
-docker compose config
+docker compose config -q
 docker compose up -d db
 docker compose exec app python -m ingest.schema_ingest chinook
 docker compose run --rm app python -m eval.benchmark
