@@ -39,6 +39,7 @@ def test_benchmark_reports_sql_accuracy_without_result_comparison(monkeypatch, t
     summary = run(str(questions))
 
     assert summary["execution_accuracy"] == 1.0
+    assert summary["result_set_accuracy"] == 1.0
     assert summary["ast_match_rate"] == 1.0
 
 

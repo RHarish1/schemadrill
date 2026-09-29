@@ -64,9 +64,9 @@ Ingestion uses the admin database URL and writes vectors. Serving uses the read-
 
 ### `eval/` implementation namespace
 
-`eval/evaluator.py` executes gold and generated SQL independently and returns `SQLEvalResult`. It records execution flags, errors/categories, AST match, columns, row counts, and wall-clock execution time.
+`eval/evaluator.py` executes gold and generated SQL independently and returns `SQLEvalResult`. It records execution flags, errors/categories, canonical `result_match`, separate AST match, columns, row counts, and wall-clock execution time.
 
-`eval/result_compare.py` compares result sets, not SQL text. Column order is significant; row order is ignored; duplicate rows are preserved; NULL is explicit; numeric representations are normalized.
+`eval/result_compare.py` exposes one comparator, `compare_result_sets()`, with `compare_results()` as a compatibility alias. It compares result sets, not SQL text. Column order is significant; row order is ignored; duplicate rows are preserved; NULL is explicit; numeric representations are normalized.
 
 `eval/models.py` defines `SQLEvalResult` and `SQLEvalSummary` as Pydantic reporting contracts.
 

@@ -83,6 +83,7 @@ def run(
                     "generated_executed": False,
                     "gold_error": None,
                     "generated_error": str(error),
+                    "result_match": False,
                     "execution_match": False,
                     "ast_match": None,
                     "elapsed_ms": round((time.perf_counter() - prompt_started) * 1000, 3),
@@ -97,25 +98,27 @@ def run(
         if output_file:
             output_file.close()
 
-    evaluated = [record for record in results if "execution_match" in record]
+    evaluated = [record for record in results if "result_match" in record]
     execution_successes = sum(record["generated_executed"] for record in evaluated)
-    execution_matches = sum(record["execution_match"] for record in evaluated)
+    result_matches = sum(record["result_match"] for record in evaluated)
     ast_matches = sum(record["ast_match"] is True for record in evaluated)
     elapsed_ms = (time.perf_counter() - started) * 1000
     total = len(evaluated)
     summary_model = SQLEvalSummary(
         dataset=dataset or Path(questions_path).stem,
         total_examples=total,
-        execution_accuracy=execution_matches / total if total else 0,
+        result_set_accuracy=result_matches / total if total else 0,
         execution_success_rate=execution_successes / total if total else 0,
         ast_match_rate=ast_matches / total if total else 0,
         execution_failures=total - execution_successes,
-        result_mismatches=total - execution_matches,
+        result_mismatches=total - result_matches,
     )
     summary = {
         **summary_model.model_dump(exclude={"records", "diagnostics"}),
         "questions": len(results),
         "successful": execution_successes,
+        "result_set_accuracy": summary_model.result_set_accuracy,
+        "execution_accuracy": summary_model.result_set_accuracy,
         "sql_accuracy": summary_model.ast_match_rate,
         "mean_elapsed_ms": round(sum(record["elapsed_ms"] for record in results) / len(results), 3),
         "total_elapsed_ms": round(elapsed_ms, 3),

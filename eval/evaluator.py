@@ -6,7 +6,7 @@ from psycopg.rows import tuple_row
 
 from app.sql_judge import judge_sql
 from eval.models import SQLEvalResult
-from eval.result_compare import compare_results
+from eval.result_compare import compare_result_sets
 
 
 def execute_for_evaluation(
@@ -85,10 +85,10 @@ def evaluate_sql_pair(
 
     gold_executed = gold_error is None
     generated_executed = generated_error is None
-    execution_match = (
+    result_match = (
         gold_executed
         and generated_executed
-        and compare_results(
+        and compare_result_sets(
             gold_columns or [],
             gold_rows or [],
             generated_columns or [],
@@ -105,7 +105,7 @@ def evaluate_sql_pair(
         generated_error=generated_error,
         gold_error_category=_error_category(gold_error),
         generated_error_category=_error_category(generated_error),
-        execution_match=execution_match,
+        result_match=result_match,
         ast_match=ast_match,
         gold_row_count=len(gold_rows) if gold_rows is not None else None,
         generated_row_count=len(generated_rows) if generated_rows is not None else None,

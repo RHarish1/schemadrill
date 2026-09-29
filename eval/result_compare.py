@@ -17,7 +17,7 @@ def _value_key(value: Any) -> tuple[str, Any]:
     return (type(value).__name__, value)
 
 
-def compare_results(
+def compare_result_sets(
     gold_columns: list[str],
     gold_rows: list[tuple[Any, ...]],
     generated_columns: list[str],
@@ -34,3 +34,13 @@ def compare_results(
     gold = Counter(tuple(_value_key(value) for value in row) for row in gold_rows)
     generated = Counter(tuple(_value_key(value) for value in row) for row in generated_rows)
     return gold == generated
+
+
+def compare_results(
+    gold_columns: list[str],
+    gold_rows: list[tuple[Any, ...]],
+    generated_columns: list[str],
+    generated_rows: list[tuple[Any, ...]],
+) -> bool:
+    """Backward-compatible alias for :func:`compare_result_sets`."""
+    return compare_result_sets(gold_columns, gold_rows, generated_columns, generated_rows)

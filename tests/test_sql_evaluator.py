@@ -2,17 +2,41 @@ from contextlib import contextmanager
 from decimal import Decimal
 
 from eval.evaluator import _error_category, evaluate_sql_pair
-from eval.result_compare import compare_results
+from eval.result_compare import compare_result_sets, compare_results
 
 
-def test_result_comparison_is_unordered_but_preserves_duplicates_and_nulls():
-    assert compare_results(
+def test_identical_result_sets_match():
+    assert compare_result_sets(["name"], [("A",)], ["name"], [("A",)])
+
+
+def test_different_row_order_still_matches():
+    assert compare_result_sets(
         ["name", "value"],
-        [("A", None), ("A", Decimal("1.0")), ("B", Decimal("2.0"))],
+        [("A", None), ("B", Decimal("2.0"))],
         ["name", "value"],
-        [("B", 2.0), ("A", 1), ("A", None)],
+        [("B", 2.0), ("A", None)],
     )
-    assert not compare_results(["name"], [("A",), ("A",)], ["name"], [("A",)])
+
+
+def test_different_duplicate_multiplicity_does_not_match():
+    assert not compare_result_sets(["name"], [("A",), ("A",)], ["name"], [("A",)])
+
+
+def test_different_column_order_does_not_match():
+    assert not compare_result_sets(["name", "id"], [("A", 1)], ["id", "name"], [(1, "A")])
+
+
+def test_different_values_do_not_match():
+    assert not compare_result_sets(["name"], [("A",)], ["name"], [("B",)])
+
+
+def test_null_handling_remains_explicit():
+    assert compare_result_sets(["value"], [(None,)], ["value"], [(None,)])
+    assert not compare_result_sets(["value"], [(None,)], ["value"], [("NULL",)])
+
+
+def test_compare_results_legacy_alias_matches_new_name():
+    assert compare_results(["name"], [("A",)], ["name"], [("A",)])
 
 
 def test_evaluator_separates_execution_success_from_result_match():
@@ -29,7 +53,8 @@ def test_evaluator_separates_execution_success_from_result_match():
 
     assert result.gold_executed
     assert result.generated_executed
-    assert not result.execution_match
+    assert not result.result_match
+    assert result.execution_match is False
     assert result.ast_match is False
     assert result.gold_row_count == result.generated_row_count == 1
 
@@ -43,7 +68,8 @@ def test_evaluator_records_generated_execution_failure():
 
     assert result.gold_executed
     assert not result.generated_executed
-    assert not result.execution_match
+    assert not result.result_match
+    assert result.execution_match is False
     assert result.generated_error_category == "timeout"
 
 

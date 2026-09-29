@@ -73,12 +73,12 @@ The embedding model remains configuration-selected through `Settings.embedding_m
 The previous benchmark called successful pipeline execution `execution_accuracy`, which could mark an incorrect query as correct. The new evaluation layer separates:
 
 - `generated_executed` / execution success
-- `execution_match` / primary semantic correctness
+- `result_match` / primary semantic correctness
 - `ast_match` / secondary sqlglot diagnostic
 - row counts and result column names
 - gold and generated execution errors
 
-`eval/models.py` contains the Pydantic `SQLEvalResult` and `SQLEvalSummary` boundary models. `eval/evaluator.py` executes gold and generated SQL independently against the same database and records each outcome. `eval/run_benchmark.py` reports execution accuracy from result comparison and keeps the legacy `sql_accuracy` field as an AST-match alias for compatibility.
+`eval/models.py` contains the Pydantic `SQLEvalResult` and `SQLEvalSummary` boundary models. `eval/evaluator.py` executes gold and generated SQL independently against the same database and records each outcome. `eval/run_benchmark.py` reports canonical result-set accuracy and keeps `execution_match`/`execution_accuracy` aliases for compatibility; `ast_match` remains a separate diagnostic.
 
 ### Result Comparison Semantics
 
