@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     retrieval_backend: str = "pgvector"
     top_k: int = 3
     max_retries: int = 3
+    disable_self_correction: bool = False
     max_result_rows: int = 1000
     log_level: str = "INFO"
 

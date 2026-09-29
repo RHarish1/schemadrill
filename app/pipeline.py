@@ -122,8 +122,9 @@ def run_pipeline(
         result,
         allowed_tables,
     )
+    effective_attempt_budget = 1 if settings.disable_self_correction else settings.max_retries
 
-    for attempt in range(1, settings.max_retries + 1):
+    for attempt in range(1, effective_attempt_budget + 1):
         state.attempt = attempt
         try:
             for stage in stages:
@@ -152,5 +153,5 @@ def run_pipeline(
         status="failed",
         sql=state.last_sql,
         reason=state.last_error or "unknown pipeline failure",
-        attempts=settings.max_retries,
+        attempts=effective_attempt_budget,
     )

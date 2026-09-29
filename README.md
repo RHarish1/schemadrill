@@ -77,6 +77,8 @@ docker compose exec app python -m eval.run_benchmark --db chinook --limit 1
 
 Each JSONL record includes `gold_sql`, `generated_sql`, `execution_match`, `ast_match`, execution errors/categories, row counts, columns, and gold/generated SQL execution times. The result comparator preserves duplicate rows, handles NULL and numeric representations, ignores row order, and keeps column order significant.
 
+Set `DISABLE_SELF_CORRECTION=true` to force the pipeline and benchmark runner to use exactly one generation/gate/execute attempt, regardless of `MAX_RETRIES`. The default `false` value preserves the configured retry budget. For local comparison artifacts, use `--disable-self-correction` with the benchmark runner and write separate outputs such as `results_retry.jsonl` and `results_noretry.jsonl`.
+
 The legacy entry point delegates to the same runner:
 
 ```sh
