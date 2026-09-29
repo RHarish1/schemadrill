@@ -17,10 +17,14 @@ def stub_dry_run(monkeypatch):
     monkeypatch.setattr("app.pipeline.dry_run", lambda connection, sql: None)
 
 
-def _settings(max_retries=3):
+def _settings(max_retries=3, disable_self_correction=False):
     from app.config import Settings
 
-    return Settings(max_retries=max_retries, top_k=3)
+    return Settings(
+        max_retries=max_retries,
+        disable_self_correction=disable_self_correction,
+        top_k=3,
+    )
 
 
 def _retrieve(question, db, top_k):
@@ -95,6 +99,43 @@ def test_retry_budget_returns_failure(monkeypatch):
 
     assert result.status == "failed"
     assert result.attempts == 3
+
+
+def test_disable_self_correction_stops_after_first_failure(monkeypatch):
+    generated = iter([SqlResponse(sql="SELECT FROM"), SqlResponse(sql="SELECT 1")])
+    generate_calls = []
+
+    result = run_pipeline(
+        "question",
+        "chinook",
+        settings=_settings(max_retries=3, disable_self_correction=True),
+        retrieve=_retrieve,
+        generate_sql=lambda messages: generate_calls.append(messages) or next(generated),
+    )
+
+    assert result.status == "failed"
+    assert result.attempts == 1
+    assert len(generate_calls) == 1
+
+
+def test_self_correction_enabled_preserves_second_generation(monkeypatch):
+    generated = iter([SqlResponse(sql="SELECT FROM"), SqlResponse(sql="SELECT 1")])
+    generate_calls = []
+
+    monkeypatch.setattr("app.pipeline.readonly_connection", lambda: _connection())
+    monkeypatch.setattr("app.pipeline.execute", lambda connection, sql, max_rows: FakeDataFrame())
+
+    result = run_pipeline(
+        "question",
+        "chinook",
+        settings=_settings(max_retries=3, disable_self_correction=False),
+        retrieve=_retrieve,
+        generate_sql=lambda messages: generate_calls.append(messages) or next(generated),
+    )
+
+    assert result.status == "success"
+    assert result.attempts == 2
+    assert len(generate_calls) == 2
 
 
 def test_row_cap_gets_one_regeneration_and_checks_before_execute(monkeypatch):

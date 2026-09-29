@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from app.config import Settings
 from app.db import readonly_connection
 from app.pipeline import run_pipeline
 from eval.evaluator import evaluate_sql_pair
@@ -23,6 +24,7 @@ def run(
     db: str | None = None,
     limit: int | None = None,
     dataset: str | None = None,
+    disable_self_correction: bool = False,
 ) -> dict[str, Any]:
     questions = load_questions(questions_path, db, limit)
     if not questions:
@@ -43,9 +45,17 @@ def run(
                     nonlocal generated_sql
                     generated_sql = sql
 
-                result = run_pipeline(
-                    item["question"], item["db"], pre_execute_check=pre_execute_check
-                )
+                if disable_self_correction:
+                    result = run_pipeline(
+                        item["question"],
+                        item["db"],
+                        settings=Settings(disable_self_correction=True),
+                        pre_execute_check=pre_execute_check,
+                    )
+                else:
+                    result = run_pipeline(
+                        item["question"], item["db"], pre_execute_check=pre_execute_check
+                    )
                 generated_sql = result.sql or generated_sql
                 evaluation = evaluate_sql_pair(
                     item.get("question_id", f"{item['db']}:{number}"),
@@ -112,6 +122,9 @@ def run(
         "output": str(output) if output else None,
     }
     print(json.dumps({"summary": summary}, sort_keys=True), flush=True)
+    if output:
+        with output.open("a", encoding="utf-8") as summary_file:
+            summary_file.write(json.dumps({"summary": summary}, sort_keys=True) + "\n")
     return summary
 
 
@@ -122,8 +135,16 @@ def main() -> None:
     parser.add_argument("--db", help="Only run questions for this schema")
     parser.add_argument("--limit", type=int, help="Run only the first N matching questions")
     parser.add_argument("--dataset", help="Dataset name to include in the summary")
+    parser.add_argument("--disable-self-correction", action="store_true")
     args = parser.parse_args()
-    run(args.questions, args.output, args.db, args.limit, args.dataset)
+    run(
+        args.questions,
+        args.output,
+        args.db,
+        args.limit,
+        args.dataset,
+        args.disable_self_correction,
+    )
 
 
 if __name__ == "__main__":
