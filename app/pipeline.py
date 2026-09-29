@@ -7,7 +7,7 @@ from app.config import Settings, get_settings
 from app.db import readonly_connection
 from app.executor import dry_run, execute
 from app.llm_client import generate
-from app.models import QueryResult, RetryState, RowCapExceeded, SqlResponse
+from app.models import QueryResult, RetrievalResult, RetryState, RowCapExceeded, SqlResponse
 from app.prompting import feedback, messages_for_retry
 from app.retrieval import get_retrieval_provider
 from app.sql_guard import default_guard_config, guard_sql
@@ -46,16 +46,20 @@ def build_pipeline_stages(
     def retrieval_stage(state: RetryState) -> RetryState:
         nonlocal authorized_tables, retrieval_complete
         if not retrieval_complete:
-            state.retrieved_ddl = retrieve_fn(question, db, settings.top_k)
-            if authorized_tables is None:
-                authorized_tables = {
-                    table_name
-                    for block in state.retrieved_ddl
-                    for table_name in (
-                        f"{block.schema_name}.{block.table_name}".lower(),
-                        block.table_name.lower(),
-                    )
-                }
+            retrieved = retrieve_fn(question, db, settings.top_k)
+            if isinstance(retrieved, RetrievalResult):
+                state.retrieved_ddl = retrieved.blocks
+            else:
+                state.retrieved_ddl = retrieved
+            retrieved_tables = {
+                table_name
+                for block in state.retrieved_ddl
+                for table_name in (
+                    f"{block.schema_name}.{block.table_name}".lower(),
+                    block.table_name.lower(),
+                )
+            }
+            authorized_tables = (authorized_tables or set()) | retrieved_tables
             retrieval_complete = True
         return state
 
