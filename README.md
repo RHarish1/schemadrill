@@ -107,22 +107,22 @@ docker compose exec app python -m eval.run_benchmark --db chinook --limit 1
 Each JSONL record includes `gold_sql`, `generated_sql`, canonical `result_match`, compatibility `execution_match`, separate `ast_match`, execution errors/categories, row counts, columns, and gold/generated SQL execution times. The result comparator preserves duplicate rows, handles NULL and numeric representations, ignores row order, and keeps column order significant. Aggregate output reports canonical `result_set_accuracy`, `execution_success_rate`, `ast_match_rate`, and `mean_elapsed_ms`, while retaining `execution_accuracy` as a compatibility alias.
 
 Set `DISABLE_SELF_CORRECTION=true` to force the pipeline and benchmark runner to use exactly one generation/gate/execute attempt, regardless of `MAX_RETRIES`. The default `false` value preserves the configured retry budget. For local comparison artifacts, use `--disable-self-correction` with the benchmark runner and write separate outputs such as `results_retry.jsonl` and `results_noretry.jsonl`.
-Enable one-hop foreign-key expansion with `ENABLE_FK_EXPANSION=true`. The following four commands use the same 23-question `eval/questions.json` set and write separate JSONL artifacts (from the running Compose app):
+The live matrix script sets `ENABLE_FK_EXPANSION` and `DISABLE_SELF_CORRECTION` for each run. To measure resume metrics (this calls Gemini; it is separate from CI):
 
 ```sh
-docker compose exec app python -m eval.run_benchmark --output /tmp/no-retry-no-fk.jsonl --disable-self-correction
-docker compose exec app python -m eval.run_benchmark --output /tmp/retry-no-fk.jsonl
-docker compose exec -e ENABLE_FK_EXPANSION=true app python -m eval.run_benchmark --output /tmp/no-retry-fk.jsonl --disable-self-correction
-docker compose exec -e ENABLE_FK_EXPANSION=true app python -m eval.run_benchmark --output /tmp/retry-fk.jsonl
+docker compose exec -T app python -m eval.run_benchmark_matrix \
+  --questions eval/questions.json --db chinook \
+  --output-dir /tmp/schemadrill-benchmark
+docker compose cp app:/tmp/schemadrill-benchmark ./benchmark-results
 ```
 
-The summary's `result_set_accuracy` is the result-match fraction; `mean_elapsed_ms` is the runner's per-question wall-clock time and includes the post-generation gold/generated SQL evaluation. Use paired runs over the same question set and report that scope with any latency claim.
+The runner writes four raw files (`no_retry_no_fk.jsonl`, `retry_no_fk.jsonl`, `no_retry_fk.jsonl`, `retry_fk.jsonl`) and `matrix_summary.json`. It warms the embedding model outside the timed run and reports result-match counts, accuracy and paired deltas. Mean elapsed time includes query generation, execution and gold/generated SQL evaluation. Report the dataset and example count with resume metrics.
 
 ### Resume metrics status
 
-The repository currently does not contain four live-generation run artifacts, so it does not support the requested self-correction or FK-expansion comparisons yet. The existing `results_noretry.jsonl` and `results_retry.jsonl` each contain 23/23 result matches and report means of 0.760 ms and 0.037 ms, respectively, but every `generated_sql` exactly equals `gold_sql`. These are controlled evaluator outputs, not live Gemini measurements; their accuracy and timing must not be used as resume claims. No FK-on artifacts are present.
+The checked-in `results_noretry.jsonl` and `results_retry.jsonl` are controlled evaluator outputs: every `generated_sql` exactly equals `gold_sql`. They are not live Gemini measurements and must not be used as resume claims. No complete live four-configuration matrix is checked in. Use `eval.run_benchmark_matrix` to create fresh artifacts for the four configurations.
 
-After the four commands finish, fill this table from each JSONL summary's `result_set_accuracy` and `mean_elapsed_ms` (latency converted to seconds for the resume bullet):
+After the matrix run finishes, use its aggregate report to fill this table (latency in seconds for the resume bullet):
 
 | Configuration | Result-set accuracy | Mean elapsed time |
 | --- | ---: | ---: |
@@ -173,7 +173,9 @@ You do not need a remote PostgreSQL instance for local development. Compose star
 
 A remote instance such as Neon is optional for shared or deployed environments. Set both `DATABASE_URL` and `INGEST_DATABASE_URL` to that instance, enable the `vector` extension, run `scripts/init.sql`, create/load the target schemas, and run ingestion before calling `/query`.
 
-## Local Checks
+## Local Checks and CI Reproduction
+
+Run the quality job and Docker/Postgres job from `.github/workflows/ci.yml` locally:
 
 ```sh
 source .venv/bin/activate
@@ -182,12 +184,31 @@ ruff check .
 black --check .
 pytest -q
 docker compose config -q
+docker compose build app
 docker compose up -d db
-docker compose exec app python -m ingest.schema_ingest chinook
 docker compose run --rm app python -m eval.benchmark
 docker compose run --rm app python -m evaluation.runner --gold-as-generated --dataset chinook
-docker compose down -v
+docker compose up -d app
+curl --fail http://localhost:8000/health
+docker compose down
 ```
+
+The evaluator smoke test uses gold SQL and does not call Gemini. `eval.benchmark` checks pgvector infrastructure; it is not the live SQL-quality benchmark. The four-run matrix above calls Gemini and is separate from CI. `docker compose down` stops the services while keeping the database volume.
+
+### Run the four live benchmark configurations
+
+Set `GEMINI_API_KEY` in `.env`, then start the database and app, ingest Chinook's schema so vector retrieval has DDL embeddings, and run the matrix:
+
+```sh
+docker compose up -d db app
+docker compose exec app python -m ingest.schema_ingest chinook
+docker compose exec -T app python -m eval.run_benchmark_matrix \
+  --questions eval/questions.json --db chinook \
+  --output-dir /tmp/schemadrill-benchmark
+docker compose cp app:/tmp/schemadrill-benchmark ./benchmark-results
+```
+
+The script performs an untimed embedding-model warm-up for each configuration, then runs the same questions with retries off/on and FK expansion off/on. It writes `no_retry_no_fk.jsonl`, `retry_no_fk.jsonl`, `no_retry_fk.jsonl`, `retry_fk.jsonl`, and `matrix_summary.json`. The summary gives accuracy deltas in percentage points and mean elapsed-time deltas in milliseconds and seconds. Keep the four raw JSONL files with the summary for reproducibility; their elapsed time includes query generation, execution, and gold/generated SQL evaluation, but excludes embedding-model download and initialization.
 
 ## CI
 
