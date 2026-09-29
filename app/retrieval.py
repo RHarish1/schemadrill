@@ -20,9 +20,7 @@ class PgVectorRetrievalProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def retrieve(
-        self, question: str, db: str, top_k: int
-    ) -> list[DDLBlock] | RetrievalResult:
+    def retrieve(self, question: str, db: str, top_k: int) -> list[DDLBlock] | RetrievalResult:
         blocks = _retrieve_pgvector(question, db, top_k)
         if not self.settings.enable_fk_expansion:
             table_names = [f"{block.schema_name}.{block.table_name}" for block in blocks]
@@ -140,13 +138,9 @@ def _retrieve_with_fk_expansion(blocks: list[DDLBlock], db: str) -> RetrievalRes
             cursor.execute(catalog_query, (db, table_names, db, table_names))
             neighbor_rows = cursor.fetchall()
 
-            neighbor_keys = {
-                (row["table_schema"], row["table_name"])
-                for row in neighbor_rows
-            }
+            neighbor_keys = {(row["table_schema"], row["table_name"]) for row in neighbor_rows}
             neighbor_keys.update(
-                (row["referenced_schema"], row["referenced_table"])
-                for row in neighbor_rows
+                (row["referenced_schema"], row["referenced_table"]) for row in neighbor_rows
             )
             expanded_keys = sorted(neighbor_keys - original_keys)
             if not expanded_keys:
@@ -170,9 +164,7 @@ def _retrieve_with_fk_expansion(blocks: list[DDLBlock], db: str) -> RetrievalRes
                     (row["schema_name"], row["table_name"]): DDLBlock(**row)
                     for row in cursor.fetchall()
                 }
-                added_blocks = [
-                    ddl_by_key[key] for key in expanded_keys if key in ddl_by_key
-                ]
+                added_blocks = [ddl_by_key[key] for key in expanded_keys if key in ddl_by_key]
                 final_blocks = blocks + added_blocks
 
     final_keys = {(block.schema_name, block.table_name) for block in final_blocks}

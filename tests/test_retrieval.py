@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 
 from app.config import Settings
-from app.models import DDLBlock, RetrievalResult
+from app.models import DDLBlock
 from app.retrieval import PgVectorRetrievalProvider, _retrieve_with_fk_expansion
 
 
@@ -44,6 +44,23 @@ def _block(schema_name, table_name):
     )
 
 
+def _fk_row(table_name, referenced_table):
+    return {
+        "table_schema": "chinook",
+        "table_name": table_name,
+        "referenced_schema": "chinook",
+        "referenced_table": referenced_table,
+    }
+
+
+def _ddl_row(table_name):
+    return {
+        "schema_name": "chinook",
+        "table_name": table_name,
+        "ddl_text": f"CREATE TABLE chinook.{table_name};",
+    }
+
+
 def _stub_connection(monkeypatch, neighbors, ddl_rows):
     @contextmanager
     def connection():
@@ -66,8 +83,8 @@ def test_expansion_disabled_returns_original_vector_results(monkeypatch):
 def test_enabled_expansion_adds_outgoing_fk_neighbor(monkeypatch):
     _stub_connection(
         monkeypatch,
-        [{"table_schema": "chinook", "table_name": "album", "referenced_schema": "chinook", "referenced_table": "artist"}],
-        [{"schema_name": "chinook", "table_name": "album", "ddl_text": "CREATE TABLE chinook.album;"}],
+        [_fk_row("album", "artist")],
+        [_ddl_row("album")],
     )
 
     result = _retrieve_with_fk_expansion([_block("chinook", "artist")], "chinook")
@@ -82,8 +99,8 @@ def test_enabled_expansion_adds_outgoing_fk_neighbor(monkeypatch):
 def test_enabled_expansion_adds_incoming_fk_neighbor(monkeypatch):
     _stub_connection(
         monkeypatch,
-        [{"table_schema": "chinook", "table_name": "track", "referenced_schema": "chinook", "referenced_table": "album"}],
-        [{"schema_name": "chinook", "table_name": "track", "ddl_text": "CREATE TABLE chinook.track;"}],
+        [_fk_row("track", "album")],
+        [_ddl_row("track")],
     )
 
     result = _retrieve_with_fk_expansion([_block("chinook", "album")], "chinook")
@@ -94,7 +111,7 @@ def test_enabled_expansion_adds_incoming_fk_neighbor(monkeypatch):
 def test_already_retrieved_fk_neighbor_is_not_duplicated(monkeypatch):
     _stub_connection(
         monkeypatch,
-        [{"table_schema": "chinook", "table_name": "album", "referenced_schema": "chinook", "referenced_table": "artist"}],
+        [_fk_row("album", "artist")],
         [],
     )
 
@@ -110,10 +127,10 @@ def test_expansion_is_one_hop_only(monkeypatch):
     _stub_connection(
         monkeypatch,
         [
-            {"table_schema": "chinook", "table_name": "album", "referenced_schema": "chinook", "referenced_table": "artist"},
-            {"table_schema": "chinook", "table_name": "track", "referenced_schema": "chinook", "referenced_table": "album"},
+            _fk_row("album", "artist"),
+            _fk_row("track", "album"),
         ],
-        [{"schema_name": "chinook", "table_name": "album", "ddl_text": "CREATE TABLE chinook.album;"}],
+        [_ddl_row("album")],
     )
 
     result = _retrieve_with_fk_expansion([_block("chinook", "artist")], "chinook")
@@ -126,12 +143,12 @@ def test_expanded_tables_are_sorted_deterministically(monkeypatch):
     _stub_connection(
         monkeypatch,
         [
-            {"table_schema": "chinook", "table_name": "zebra", "referenced_schema": "chinook", "referenced_table": "artist"},
-            {"table_schema": "chinook", "table_name": "album", "referenced_schema": "chinook", "referenced_table": "artist"},
+            _fk_row("zebra", "artist"),
+            _fk_row("album", "artist"),
         ],
         [
-            {"schema_name": "chinook", "table_name": "zebra", "ddl_text": "CREATE TABLE chinook.zebra;"},
-            {"schema_name": "chinook", "table_name": "album", "ddl_text": "CREATE TABLE chinook.album;"},
+            _ddl_row("zebra"),
+            _ddl_row("album"),
         ],
     )
 
