@@ -1,6 +1,6 @@
 # Module Reference
 
-This is the module-level map for SchemaDrill. The request path is:
+This is the module-level map for SchemaDrill. The rendered architecture diagram is in the [README](../README.md#architecture). The request path is:
 
 ```text
 app.main
@@ -31,7 +31,7 @@ evaluation.runner
 | `app/pipeline.py` | Ordered query workflow and retry orchestration | `PipelineStage: RetryState -> RetryState`; `run_pipeline()` | Calls retrieval, Gemini, PostgreSQL `EXPLAIN`, and execution; retains only latest retry SQL/error |
 | `app/prompting.py` | Stateless Gemini prompt construction | `build_messages()`, `messages_for_retry()` | Logs the exact generated prompt; does not accumulate prior messages |
 | `app/llm_client.py` | Structured Gemini generation and token counting | `generate()`, `count_prompt_tokens()` | Network calls to Gemini; validates output as `SqlResponse` through Instructor |
-| `app/retrieval.py` | Retrieval provider abstraction and pgvector implementation | `RetrievalProvider`, `get_retrieval_provider()` | Embeds the question and queries `schema_embeddings`; Qdrant/FAISS are explicit v0-unavailable providers |
+| `app/retrieval.py` | Retrieval provider abstraction, pgvector lookup, and optional one-hop FK expansion | `RetrievalProvider`, `get_retrieval_provider()` | Embeds the question and queries `schema_embeddings`; optional catalog neighbors are appended in deterministic order; Qdrant/FAISS are explicit v0-unavailable providers |
 | `app/embedding.py` | Config-selected sentence-transformer loading and embedding | `embed_passage()`, `embed_query()` | Loads and caches the configured embedding model; CPU model loading can be expensive |
 | `app/db.py` | Shared PostgreSQL connection-pool boundary | `readonly_connection()`, `close_pool()` | Opens pooled connections and sets transactions read-only |
 | `app/sql_guard.py` | Deterministic SQL security boundary | `guard_sql()`, `SQLGuardResult`, `default_guard_config()` | Parses PostgreSQL ASTs; enforces single SELECT, RBAC table scope, blocked functions, and AST-based LIMIT policy |

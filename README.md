@@ -1,6 +1,35 @@
 # SchemaDrill
 
-SchemaDrill is a retrieval-augmented PostgreSQL text-to-SQL service. It embeds one DDL block per table into pgvector, retrieves the top three tables for a question, sends the retrieved schema and question to Gemini, validates the generated SQL, and executes it with a bounded retry loop.
+SchemaDrill is a retrieval-augmented PostgreSQL text-to-SQL service. It embeds one DDL block per table into pgvector, retrieves the top three tables for a question, optionally expands one hop across foreign keys, sends the retrieved schema and question to Gemini, validates the generated SQL, and executes it with a bounded retry loop.
+
+## Architecture
+
+GitHub renders this Mermaid diagram directly in the README. It shows the request path, optional schema expansion, retry feedback, and the separate evaluation path.
+
+```mermaid
+flowchart LR
+    Client[Client] --> API[FastAPI query API]
+    API --> Pipe[Pipeline]
+    Pipe --> Retrieve[Question embedding and pgvector top-k]
+    Retrieve --> Expand{FK expansion enabled?}
+    Expand -- yes --> Catalog[Information schema one-hop neighbors]
+    Catalog --> DDL[Fetch neighbor DDL from schema_embeddings]
+    Expand -- no --> Context
+    DDL --> Context[Final retrieved schema context]
+    Context --> Prompt[Prompt with question and retry feedback]
+    Prompt --> Gemini[Gemini SQL generation]
+    Gemini --> Guard[SQL guard and authorized table scope]
+    Guard --> DryRun[PostgreSQL EXPLAIN]
+    DryRun -->|Rejected or invalid, retries remain| Prompt
+    DryRun -->|Accepted| Execute[Read-only bounded execution]
+    Execute --> API
+    API --> Client
+
+    Questions[Benchmark questions and gold SQL] --> Runner[Evaluation runner]
+    Runner --> Pipe
+    Runner --> Compare[Execute gold and generated SQL]
+    Compare --> Metrics[Result-set accuracy, success, AST match, elapsed time]
+```
 
 See [docs/modules.md](docs/modules.md) for the module-by-module ownership map and [docs/implementation-notes.md](docs/implementation-notes.md) for the implementation decisions and troubleshooting history.
 
@@ -78,6 +107,31 @@ docker compose exec app python -m eval.run_benchmark --db chinook --limit 1
 Each JSONL record includes `gold_sql`, `generated_sql`, canonical `result_match`, compatibility `execution_match`, separate `ast_match`, execution errors/categories, row counts, columns, and gold/generated SQL execution times. The result comparator preserves duplicate rows, handles NULL and numeric representations, ignores row order, and keeps column order significant. Aggregate output reports canonical `result_set_accuracy`, `execution_success_rate`, `ast_match_rate`, and `mean_elapsed_ms`, while retaining `execution_accuracy` as a compatibility alias.
 
 Set `DISABLE_SELF_CORRECTION=true` to force the pipeline and benchmark runner to use exactly one generation/gate/execute attempt, regardless of `MAX_RETRIES`. The default `false` value preserves the configured retry budget. For local comparison artifacts, use `--disable-self-correction` with the benchmark runner and write separate outputs such as `results_retry.jsonl` and `results_noretry.jsonl`.
+Enable one-hop foreign-key expansion with `ENABLE_FK_EXPANSION=true`. The following four commands use the same 23-question `eval/questions.json` set and write separate JSONL artifacts (from the running Compose app):
+
+```sh
+docker compose exec app python -m eval.run_benchmark --output /tmp/no-retry-no-fk.jsonl --disable-self-correction
+docker compose exec app python -m eval.run_benchmark --output /tmp/retry-no-fk.jsonl
+docker compose exec -e ENABLE_FK_EXPANSION=true app python -m eval.run_benchmark --output /tmp/no-retry-fk.jsonl --disable-self-correction
+docker compose exec -e ENABLE_FK_EXPANSION=true app python -m eval.run_benchmark --output /tmp/retry-fk.jsonl
+```
+
+The summary's `result_set_accuracy` is the result-match fraction; `mean_elapsed_ms` is the runner's per-question wall-clock time and includes the post-generation gold/generated SQL evaluation. Use paired runs over the same question set and report that scope with any latency claim.
+
+### Resume metrics status
+
+The repository currently does not contain four live-generation run artifacts, so it does not support the requested self-correction or FK-expansion comparisons yet. The existing `results_noretry.jsonl` and `results_retry.jsonl` each contain 23/23 result matches and report means of 0.760 ms and 0.037 ms, respectively, but every `generated_sql` exactly equals `gold_sql`. These are controlled evaluator outputs, not live Gemini measurements; their accuracy and timing must not be used as resume claims. No FK-on artifacts are present.
+
+After the four commands finish, fill this table from each JSONL summary's `result_set_accuracy` and `mean_elapsed_ms` (latency converted to seconds for the resume bullet):
+
+| Configuration | Result-set accuracy | Mean elapsed time |
+| --- | ---: | ---: |
+| No self-correction | Not measured | Not measured |
+| With self-correction | Not measured | Not measured |
+| No FK expansion | Not measured | Not measured |
+| With FK expansion | Not measured | Not measured |
+
+Do not infer an improvement unless the paired run artifacts show it; report the example count and dataset with the figures.
 
 The legacy entry point delegates to the same runner:
 
