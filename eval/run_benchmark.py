@@ -25,10 +25,17 @@ def run(
     limit: int | None = None,
     dataset: str | None = None,
     disable_self_correction: bool = False,
+    warmup: bool = False,
 ) -> dict[str, Any]:
     questions = load_questions(questions_path, db, limit)
     if not questions:
         raise ValueError("No benchmark questions matched the selected filters")
+
+    if warmup:
+        from app.embedding import embed_query
+
+        print("Warming embedding model outside the timed run", flush=True)
+        embed_query("benchmark warm-up")
 
     output = Path(output_path) if output_path else None
     results: list[dict[str, Any]] = []
@@ -139,6 +146,11 @@ def main() -> None:
     parser.add_argument("--limit", type=int, help="Run only the first N matching questions")
     parser.add_argument("--dataset", help="Dataset name to include in the summary")
     parser.add_argument("--disable-self-correction", action="store_true")
+    parser.add_argument(
+        "--warmup",
+        action="store_true",
+        help="Load the embedding model before timing the benchmark",
+    )
     args = parser.parse_args()
     run(
         args.questions,
@@ -147,6 +159,7 @@ def main() -> None:
         args.limit,
         args.dataset,
         args.disable_self_correction,
+        args.warmup,
     )
 
 
