@@ -23,5 +23,95 @@
         "db": "chinook",
         "question": "Show the three longest tracks.",
         "gold_sql": "SELECT name, milliseconds FROM chinook.track ORDER BY milliseconds DESC LIMIT 3;"
+    },
+    {
+        "db": "chinook",
+        "question": "List every artist ID and name in artist ID order.",
+        "gold_sql": "SELECT artist_id, name FROM chinook.artist ORDER BY artist_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List the albums whose titles begin with the letter B.",
+        "gold_sql": "SELECT album_id, title FROM chinook.album WHERE title LIKE 'B%' ORDER BY album_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List tracks longer than five minutes, longest first.",
+        "gold_sql": "SELECT track_id, name, milliseconds FROM chinook.track WHERE milliseconds > 300000 ORDER BY milliseconds DESC, track_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List the names of tracks priced at 0.99 in alphabetical order.",
+        "gold_sql": "SELECT name FROM chinook.track WHERE unit_price = 0.99 ORDER BY name;"
+    },
+    {
+        "db": "chinook",
+        "question": "Show all album titles in reverse alphabetical order.",
+        "gold_sql": "SELECT title FROM chinook.album ORDER BY title DESC;"
+    },
+    {
+        "db": "chinook",
+        "question": "List the artists whose names start with A.",
+        "gold_sql": "SELECT artist_id, name FROM chinook.artist WHERE name LIKE 'A%' ORDER BY name, artist_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "Show each artist name alongside the titles of their albums.",
+        "gold_sql": "SELECT artist.name, album.title FROM chinook.artist AS artist JOIN chinook.album AS album ON album.artist_id = artist.artist_id ORDER BY artist.artist_id, album.album_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List each album title with the names of its tracks.",
+        "gold_sql": "SELECT album.title, track.name FROM chinook.album AS album JOIN chinook.track AS track ON track.album_id = album.album_id ORDER BY album.album_id, track.track_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "Which albums belong to the artist Accept?",
+        "gold_sql": "SELECT album.title FROM chinook.artist AS artist JOIN chinook.album AS album ON album.artist_id = artist.artist_id WHERE artist.name = 'Accept' ORDER BY album.album_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List album titles and track names for tracks longer than five minutes.",
+        "gold_sql": "SELECT album.title, track.name FROM chinook.album AS album JOIN chinook.track AS track ON track.album_id = album.album_id WHERE track.milliseconds > 300000 ORDER BY track.milliseconds DESC, track.track_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List track names, their album titles, and prices for tracks costing less than one dollar.",
+        "gold_sql": "SELECT track.name, album.title, track.unit_price FROM chinook.track AS track JOIN chinook.album AS album ON album.album_id = track.album_id WHERE track.unit_price < 1.00 ORDER BY track.name, track.track_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List every artist, album, and track name in hierarchy order.",
+        "gold_sql": "SELECT artist.name AS artist_name, album.title AS album_title, track.name AS track_name FROM chinook.artist AS artist JOIN chinook.album AS album ON album.artist_id = artist.artist_id JOIN chinook.track AS track ON track.album_id = album.album_id ORDER BY artist.artist_id, album.album_id, track.track_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List the tracks recorded by Accept with their album titles.",
+        "gold_sql": "SELECT track.name, album.title FROM chinook.artist AS artist JOIN chinook.album AS album ON album.artist_id = artist.artist_id JOIN chinook.track AS track ON track.album_id = album.album_id WHERE artist.name = 'Accept' ORDER BY album.album_id, track.track_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "List artists and albums for tracks longer than five minutes.",
+        "gold_sql": "SELECT artist.name, album.title, track.name AS track_name FROM chinook.artist AS artist JOIN chinook.album AS album ON album.artist_id = artist.artist_id JOIN chinook.track AS track ON track.album_id = album.album_id WHERE track.milliseconds > 300000 ORDER BY track.milliseconds DESC, track.track_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "How many tracks does each artist have?",
+        "gold_sql": "SELECT artist.name, COUNT(track.track_id) AS track_count FROM chinook.artist AS artist LEFT JOIN chinook.album AS album ON album.artist_id = artist.artist_id LEFT JOIN chinook.track AS track ON track.album_id = album.album_id GROUP BY artist.artist_id, artist.name ORDER BY artist.artist_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "What is the total duration in milliseconds of tracks on each album?",
+        "gold_sql": "SELECT album.title, SUM(track.milliseconds) AS total_milliseconds FROM chinook.album AS album LEFT JOIN chinook.track AS track ON track.album_id = album.album_id GROUP BY album.album_id, album.title ORDER BY album.album_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "What is the average track duration for each album?",
+        "gold_sql": "SELECT album.title, AVG(track.milliseconds) AS average_milliseconds FROM chinook.album AS album LEFT JOIN chinook.track AS track ON track.album_id = album.album_id GROUP BY album.album_id, album.title ORDER BY album.album_id;"
+    },
+    {
+        "db": "chinook",
+        "question": "What is the average track price for each artist?",
+        "gold_sql": "SELECT artist.name, AVG(track.unit_price) AS average_price FROM chinook.artist AS artist LEFT JOIN chinook.album AS album ON album.artist_id = artist.artist_id LEFT JOIN chinook.track AS track ON track.album_id = album.album_id GROUP BY artist.artist_id, artist.name ORDER BY artist.artist_id;"
     }
 ]
