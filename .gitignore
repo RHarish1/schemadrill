@@ -14,3 +14,5 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 frontend/.env.local
+.neon
+node_modules/

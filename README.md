@@ -246,6 +246,31 @@ The application only needs the read-only connection at runtime. I use the admini
 connection for ingestion only, and rotate the demo credentials from the checked-in
 development values before putting the database on the public internet.
 
+For the Neon `production` branch, I use the direct (unpooled) connection for setup and
+ingestion. I run the two SQL files in this order from the Neon SQL Editor:
+
+1. [`scripts/init.sql`](scripts/init.sql) enables pgvector, creates the
+   `schema_embeddings` table and HNSW index, and grants the minimum permissions to
+   `schemadrill_readonly`.
+2. [`scripts/load_demo_dbs.sql`](scripts/load_demo_dbs.sql) creates the `chinook` schema,
+   inserts the deterministic artist, album, and track rows, and grants read access.
+3. From the repository root, I point `INGEST_DATABASE_URL` at the Neon direct connection
+   and generate the vector rows:
+
+   ```sh
+   INGEST_DATABASE_URL="$DATABASE_URL_UNPOOLED" \
+     .venv/bin/python -m ingest.schema_ingest chinook
+   ```
+
+   If the environment has not been pulled yet, I first run `neon env pull` and load the
+   resulting `.env` without printing its values.
+
+The SQL seed is idempotent: rerunning it keeps existing rows through `ON CONFLICT DO
+NOTHING`. Schema ingestion is also idempotent and refreshes each table's DDL and
+embedding through `ON CONFLICT DO UPDATE`. I verify the setup before deploying by
+confirming that `chinook.artist`, `chinook.album`, `chinook.track`, and
+`public.schema_embeddings` exist and that the three Chinook row counts are non-zero.
+
 ### Deploying the container
 
 After installing and authenticating the Google Cloud CLI, I select a project and region:

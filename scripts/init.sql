@@ -3,7 +3,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'schemadrill_readonly') THEN
-    CREATE ROLE schemadrill_readonly LOGIN PASSWORD 'schemadrill';
+    CREATE ROLE schemadrill_readonly LOGIN;
   END IF;
 END
 $$;
@@ -19,5 +19,13 @@ CREATE TABLE IF NOT EXISTS public.schema_embeddings (
 CREATE INDEX IF NOT EXISTS schema_embeddings_embedding_hnsw
   ON public.schema_embeddings USING hnsw (embedding vector_cosine_ops);
 
+DO $$
+BEGIN
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO schemadrill_readonly',
+    current_database()
+  );
+END
+$$;
 GRANT USAGE ON SCHEMA public TO schemadrill_readonly;
 GRANT SELECT ON public.schema_embeddings TO schemadrill_readonly;
