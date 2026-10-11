@@ -323,4 +323,9 @@ The script performs an untimed embedding-model warm-up for each configuration, t
 
 ## CI
 
-GitHub Actions runs Ruff, Black, pytest, Docker Compose validation, Postgres/pgvector checks, the vector benchmark, and the credential-free Chinook evaluator smoke test. The smoke test validates EX, AST, and result execution against the seeded gold SQL without calling Gemini. BIRD Mini-Dev is intentionally excluded from push/PR CI and should run manually or nightly.
+GitHub Actions runs the frontend dependency safety/build gate (`npm ci`, high-severity
+`npm audit`, and `npm run build`), Ruff, Black, pytest, Docker Compose validation,
+Postgres/pgvector checks, the vector benchmark, and the credential-free Chinook evaluator
+smoke test. The smoke test validates EX, AST, and result execution against the seeded gold
+SQL without calling Gemini. BIRD Mini-Dev is intentionally excluded from push/PR CI and
+should run manually or nightly.
