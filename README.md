@@ -39,7 +39,7 @@ The repository currently implements the v0 runtime end to end: Docker Compose, P
 
 The evaluation harness distinguishes generated-query execution success, result-based Execution Accuracy (EX), AST similarity, result metadata, and SQL execution timing. Chinook is the fast deterministic regression dataset. BIRD Mini-Dev is an opt-in evaluation dataset and is not run on every push.
 
-This is still a deliberately small v0 benchmark: the checked-in dataset is deterministic Chinook smoke data, not the planned multi-database Spider/BIRD subset. Database RBAC remains the final boundary; application-level SQL guard enforcement, result comparison, judge-model calls, caching, tracing, and frontend work are at different maturity levels and are documented separately.
+This is still a deliberately small v0 benchmark: the checked-in dataset is deterministic Chinook smoke data, not the planned multi-database Spider/BIRD subset. Database RBAC remains the final boundary; application-level SQL guard enforcement, result comparison, judge-model calls, caching, tracing, and evaluation dashboards remain separate from the interactive frontend.
 
 ## Run Locally
 
@@ -80,6 +80,22 @@ curl -X POST http://localhost:8000/query \
  -d '{"db":"chinook","question":"List the names of all artists."}'
 ```
 
+Open <http://localhost:8000/> for the built-in React frontend. For frontend development,
+run the API on port 8000 and then:
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite development server is available at <http://localhost:5173/> and proxies queries
+to the API. A production Docker build compiles React and serves it from FastAPI.
+For a separately hosted API, copy `frontend/.env.example` to `frontend/.env` and set
+`VITE_API_BASE_URL` to the API origin. The interactive frontend currently exposes the
+seeded `chinook` dataset; BIRD Mini-Dev remains evaluation-only because the backend has
+no dataset discovery or interactive BIRD endpoint.
+
 View retrieval similarity scores, the exact Gemini prompt, and generated SQL:
 
 ```sh
@@ -87,6 +103,101 @@ docker compose logs -f app
 ```
 
 The API uses a read-only Postgres role. `sql_guard` is a deterministic defense-in-depth boundary before `EXPLAIN`: only single SELECT statements are allowed, physical tables are checked against the retrieved/RBAC scope, privileged PostgreSQL functions are blocked, and a configured maximum LIMIT is injected or enforced. PostgreSQL RBAC remains the final security boundary.
+
+## Interactive Frontend
+
+The frontend is a small React/Vite single-page application in [`frontend/`](frontend/).
+It is intentionally focused on interactive Text-to-SQL querying rather than benchmark
+reporting or database administration.
+
+### User flow
+
+1. The app calls `GET /health` when it loads and shows whether the API is online.
+2. The user selects the verified interactive dataset (`chinook`), enters a natural-language
+   question, or chooses an example question.
+3. The user submits with **Run query** or `Ctrl+Enter` / `Cmd+Enter`.
+4. The app sends `POST /query` with the existing request shape:
+
+   ```json
+   {
+     "db": "chinook",
+     "question": "List all artists."
+   }
+   ```
+
+5. While the request is running, duplicate submissions are disabled and the UI displays a
+   loading state. Requests have a 30-second client-side timeout.
+6. Successful responses show the returned rows in a horizontally scrollable table,
+   dynamically generated columns, row and column counts, the number of pipeline attempts,
+   generated SQL, and an expandable execution-details section.
+7. `NULL` values are displayed distinctly from empty strings. Returned rows can be
+   downloaded as CSV, and generated SQL can be copied when the API returns it.
+8. Failed API requests and pipeline failures are displayed separately from successful
+   results. The original question remains in the editor so it can be retried.
+
+The frontend does not fabricate SQL, result rows, timing, schema similarity scores, or
+evaluation metrics. The current backend returns `status`, `sql`, `table_markdown`,
+`columns`, `rows`, `attempts`, and `reason`; the UI renders only the fields available in
+that response. The legacy `table_markdown` field remains in the API for compatibility,
+while `columns` and `rows` provide the structured data used by the table and CSV export.
+
+### Frontend configuration
+
+The frontend API service is in [`frontend/src/services/api.ts`](frontend/src/services/api.ts).
+Set `VITE_API_BASE_URL` when the Vite server is hosted separately from FastAPI:
+
+```sh
+cd frontend
+cp .env.example .env
+# Example:
+# VITE_API_BASE_URL=http://localhost:8000
+npm run dev
+```
+
+When `VITE_API_BASE_URL` is blank, the frontend uses relative URLs. This is the default
+for both the Vite development proxy and the production frontend mounted by FastAPI at
+`http://localhost:8000/`. Do not put Gemini keys, database URLs, or other credentials in
+frontend environment variables; Vite variables are exposed to the browser.
+
+### Running the frontend and API together
+
+For local development, start the API and frontend in separate terminals:
+
+```sh
+# Terminal 1: from the repository root
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 2: from frontend/
+npm install
+npm run dev
+```
+
+Open <http://localhost:5173/>. The Vite proxy forwards `/health` and `/query` to
+`http://localhost:8000`. For the full database-backed flow, PostgreSQL must also be
+running and the `chinook` schema must be seeded and ingested. The simplest setup is:
+
+```sh
+docker compose up -d --build
+docker compose exec app python -m ingest.schema_ingest chinook
+```
+
+If the API is running but the frontend reports a query timeout or the backend logs
+`failed to resolve host 'db'`, the database service is not reachable from the API
+process. Start the Compose database or configure `DATABASE_URL` for a locally reachable
+PostgreSQL instance.
+
+For a production-style local check, build the frontend and start FastAPI. The Dockerfile
+performs the same build in a Node stage and copies `frontend/dist` into the Python image:
+
+```sh
+cd frontend
+npm run build
+cd ..
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Then open <http://localhost:8000/>. The API documentation remains available at
+<http://localhost:8000/docs>.
 
 ## Prompt Benchmark
 
