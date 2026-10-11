@@ -146,10 +146,15 @@ def run_pipeline(
             )
 
         dataframe = result["dataframe"]
+        columns = list(getattr(dataframe, "columns", []))
+        to_dict = getattr(dataframe, "to_dict", None)
+        rows = to_dict(orient="records") if callable(to_dict) else []
         return QueryResult(
             status="success",
             sql=state.last_sql,
             table_markdown=dataframe.to_markdown(index=False),
+            columns=[str(column) for column in columns],
+            rows=rows,
             attempts=attempt,
         )
 

@@ -16,6 +16,8 @@ class QueryResult(BaseModel):
     status: Literal["success", "failed"]
     sql: str | None = None
     table_markdown: str | None = None
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, object]] = Field(default_factory=list)
     attempts: int
     reason: str | None = None
 
