@@ -207,6 +207,129 @@ cd ..
 Then open <http://localhost:8000/>. The API documentation remains available at
 <http://localhost:8000/docs>.
 
+## Deploying to Google Cloud Run
+
+For a small public demo, I can run the container on Cloud Run and use a managed
+PostgreSQL provider that supports pgvector, such as Neon. The Docker image serves the
+React frontend and FastAPI backend together, so I do not need a second frontend service.
+Cloud Run supplies the listening port through `PORT`, and the image now uses that value
+while retaining port `8000` as the local fallback.
+
+### Before I deploy
+
+I first make sure the local stack works:
+
+```sh
+docker compose config -q
+docker compose up -d --build
+curl --fail http://localhost:8000/health
+docker compose logs --tail=100 app
+```
+
+I also create a PostgreSQL database with the `vector` extension and load both the
+Chinook tables and their schema embeddings. An empty remote database is not enough:
+`/query` needs the demo tables, `schema_embeddings`, and the embedding model.
+
+For a managed database, I apply [`scripts/init.sql`](scripts/init.sql), apply
+[`scripts/load_demo_dbs.sql`](scripts/load_demo_dbs.sql), and then run ingestion against
+the remote database. I keep the connection strings private and never commit them:
+
+```sh
+docker compose build app
+docker compose run --rm \
+  -e DATABASE_URL="$REMOTE_READONLY_DATABASE_URL" \
+  -e INGEST_DATABASE_URL="$REMOTE_ADMIN_DATABASE_URL" \
+  app python -m ingest.schema_ingest chinook
+```
+
+The application only needs the read-only connection at runtime. I use the administrative
+connection for ingestion only, and rotate the demo credentials from the checked-in
+development values before putting the database on the public internet.
+
+### Deploying the container
+
+After installing and authenticating the Google Cloud CLI, I select a project and region:
+
+```sh
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud config set run/region asia-south1
+```
+
+From the repository root, I deploy the existing Dockerfile:
+
+```sh
+gcloud run deploy schemadrill \
+  --source . \
+  --region asia-south1 \
+  --allow-unauthenticated \
+  --memory 2Gi \
+  --cpu 1 \
+  --min 0 \
+  --max 2 \
+  --timeout 300
+```
+
+`--min 0` lets the service scale down when unused, `--max 2` limits the demo's
+concurrency footprint, and `--memory 2Gi` gives PyTorch and the embedding model enough
+room during a cold start. Cloud Build uses the committed `wheels/` directory and
+`frontend/package-lock.json`, so I check that both are present before deploying.
+
+### Configuring secrets and runtime settings
+
+I configure these values on the Cloud Run service, preferably through Secret Manager for
+the database URLs and Gemini key:
+
+```text
+DATABASE_URL=<remote read-only PostgreSQL URL>
+INGEST_DATABASE_URL=<remote admin URL, normally only needed for ingestion>
+GEMINI_API_KEY=<Gemini API key>
+MODEL_NAME=gemini-3.1-flash-lite
+EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+TOP_K=3
+MAX_RETRIES=3
+MAX_RESULT_ROWS=1000
+LOG_LEVEL=INFO
+```
+
+I do not put secrets in the Dockerfile, frontend environment variables, Git history, or
+the public README. Frontend variables are browser-visible; database credentials and API
+keys must stay server-side.
+
+### Checking the live service
+
+Cloud Run prints the service URL after deployment. I verify the deployment in this order:
+
+```sh
+curl --fail https://YOUR_SERVICE_URL/health
+curl --fail https://YOUR_SERVICE_URL/docs
+curl --fail https://YOUR_SERVICE_URL/
+curl --fail https://YOUR_SERVICE_URL/openapi.json
+```
+
+Then I send one real request:
+
+```sh
+curl --fail https://YOUR_SERVICE_URL/query \
+  -H 'Content-Type: application/json' \
+  -d '{"db":"chinook","question":"List the names of all artists."}'
+```
+
+The first query may take longer while the embedding model loads. If `/health` works but
+`/query` fails, I check the Cloud Run logs, database network access, pgvector setup,
+Chinook ingestion, and `GEMINI_API_KEY` before changing the frontend.
+
+Cloud Run logs go to the platform log stream because SchemaDrill writes logs to stdout.
+I can inspect them with:
+
+```sh
+gcloud run services logs read schemadrill --region asia-south1 --limit 100
+```
+
+I set a billing budget alert, keep the minimum instance count at zero, cap the maximum
+instances, and monitor both Cloud Run and the managed database. A free tier is not a
+guarantee of zero cost.
+
 ## Prompt Benchmark
 
 Run every prompt sequentially through retrieval, Gemini, SQL validation, the offline parsed-SQL judge, and Postgres execution:
