@@ -1,6 +1,8 @@
 # SchemaDrill
 
-SchemaDrill is a retrieval-augmented PostgreSQL text-to-SQL service. It embeds one DDL block per table into pgvector, retrieves the top three tables for a question, optionally expands one hop across foreign keys, sends the retrieved schema and question to Gemini, validates the generated SQL, and executes it with a bounded retry loop.
+I built SchemaDrill to let me ask a PostgreSQL database questions in plain English. It
+retrieves the most relevant schema, asks Gemini to write a read-only query, checks that
+query, and runs it with a small, bounded retry loop when correction is needed.
 
 ## Architecture
 
@@ -35,11 +37,18 @@ See [docs/modules.md](docs/modules.md) for the module-by-module ownership map an
 
 ## Current v0 Status
 
-The repository currently implements the v0 runtime end to end: Docker Compose, PostgreSQL/pgvector, local `bge-small-en-v1.5` retrieval, structured Gemini SQL generation, PostgreSQL parsing and `EXPLAIN` retries, read-only execution, row-cap handling, and Markdown result generation.
+The v0 runtime is complete enough for local experimentation: Docker Compose gives me
+PostgreSQL and pgvector, the local embedding model retrieves schema context, Gemini
+generates structured SQL, PostgreSQL validates it, and the executor keeps reads bounded.
+The API returns both the original Markdown representation and structured rows for the
+frontend.
 
 The evaluation harness distinguishes generated-query execution success, result-based Execution Accuracy (EX), AST similarity, result metadata, and SQL execution timing. Chinook is the fast deterministic regression dataset. BIRD Mini-Dev is an opt-in evaluation dataset and is not run on every push.
 
-This is still a deliberately small v0 benchmark: the checked-in dataset is deterministic Chinook smoke data, not the planned multi-database Spider/BIRD subset. Database RBAC remains the final boundary; application-level SQL guard enforcement, result comparison, judge-model calls, caching, tracing, and evaluation dashboards remain separate from the interactive frontend.
+I am keeping the first version deliberately small. The checked-in dataset is deterministic
+Chinook smoke data rather than a full Spider/BIRD installation. Database RBAC is still the
+final security boundary, while evaluation, result comparison, tracing, and dashboards stay
+separate from the interactive playground.
 
 ## Run Locally
 
@@ -106,17 +115,18 @@ The API uses a read-only Postgres role. `sql_guard` is a deterministic defense-i
 
 ## Interactive Frontend
 
-The frontend is a small React/Vite single-page application in [`frontend/`](frontend/).
-It is intentionally focused on interactive Text-to-SQL querying rather than benchmark
-reporting or database administration.
+When I open the frontend, I get a small React/Vite Text-to-SQL workspace rather than a
+large dashboard. I can choose the verified `chinook` dataset, type a question, pick an
+example, and inspect exactly what came back from the API.
 
 ### User flow
 
-1. The app calls `GET /health` when it loads and shows whether the API is online.
-2. The user selects the verified interactive dataset (`chinook`), enters a natural-language
-   question, or chooses an example question.
-3. The user submits with **Run query** or `Ctrl+Enter` / `Cmd+Enter`.
-4. The app sends `POST /query` with the existing request shape:
+1. On load, the frontend calls `GET /health`, so I can immediately see whether the API is
+   reachable.
+2. I select `chinook`, type a natural-language question, or click one of the example
+   questions.
+3. I press **Run query** or `Ctrl+Enter` / `Cmd+Enter`.
+4. The frontend sends the existing `POST /query` request:
 
    ```json
    {
@@ -125,26 +135,25 @@ reporting or database administration.
    }
    ```
 
-5. While the request is running, duplicate submissions are disabled and the UI displays a
-   loading state. Requests have a 30-second client-side timeout.
-6. Successful responses show the returned rows in a horizontally scrollable table,
-   dynamically generated columns, row and column counts, the number of pipeline attempts,
-   generated SQL, and an expandable execution-details section.
-7. `NULL` values are displayed distinctly from empty strings. Returned rows can be
-   downloaded as CSV, and generated SQL can be copied when the API returns it.
-8. Failed API requests and pipeline failures are displayed separately from successful
-   results. The original question remains in the editor so it can be retried.
+5. While it runs, the button is disabled and I see a loading state. The browser gives the
+   request 30 seconds before showing a timeout.
+6. When it succeeds, I see a scrollable results table, dynamic columns, row and column
+   counts, the retry count, the generated SQL, and expandable execution details.
+7. `NULL` values stay visibly different from empty strings. I can copy the SQL or download
+   the returned rows as CSV.
+8. If the API or pipeline fails, the frontend shows the failure separately and leaves my
+   question in place so I can try again.
 
-The frontend does not fabricate SQL, result rows, timing, schema similarity scores, or
-evaluation metrics. The current backend returns `status`, `sql`, `table_markdown`,
-`columns`, `rows`, `attempts`, and `reason`; the UI renders only the fields available in
-that response. The legacy `table_markdown` field remains in the API for compatibility,
-while `columns` and `rows` provide the structured data used by the table and CSV export.
+I intentionally do not fabricate SQL, result rows, timing, schema scores, or evaluation
+metrics in the browser. The backend currently returns `status`, `sql`, `table_markdown`,
+`columns`, `rows`, `attempts`, and `reason`. The frontend only renders those fields. The
+older `table_markdown` field remains for compatibility; `columns` and `rows` power the
+table and CSV export.
 
 ### Frontend configuration
 
 The frontend API service is in [`frontend/src/services/api.ts`](frontend/src/services/api.ts).
-Set `VITE_API_BASE_URL` when the Vite server is hosted separately from FastAPI:
+If I host Vite separately from FastAPI, I set `VITE_API_BASE_URL`:
 
 ```sh
 cd frontend
@@ -154,14 +163,14 @@ cp .env.example .env
 npm run dev
 ```
 
-When `VITE_API_BASE_URL` is blank, the frontend uses relative URLs. This is the default
-for both the Vite development proxy and the production frontend mounted by FastAPI at
-`http://localhost:8000/`. Do not put Gemini keys, database URLs, or other credentials in
-frontend environment variables; Vite variables are exposed to the browser.
+When it is blank, the frontend uses relative URLs. That is what I want for the Vite
+development proxy and for the production frontend mounted by FastAPI at
+`http://localhost:8000/`. I never put Gemini keys, database URLs, or other credentials in
+these variables because Vite exposes them to the browser.
 
 ### Running the frontend and API together
 
-For local development, start the API and frontend in separate terminals:
+For local development, I start the API and frontend in separate terminals:
 
 ```sh
 # Terminal 1: from the repository root
@@ -172,22 +181,21 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173/>. The Vite proxy forwards `/health` and `/query` to
-`http://localhost:8000`. For the full database-backed flow, PostgreSQL must also be
-running and the `chinook` schema must be seeded and ingested. The simplest setup is:
+Then I open <http://localhost:5173/>. The Vite proxy forwards `/health` and `/query` to
+`http://localhost:8000`. To run a real query, PostgreSQL must be running and the
+`chinook` schema must be seeded and ingested. The quickest setup is:
 
 ```sh
 docker compose up -d --build
 docker compose exec app python -m ingest.schema_ingest chinook
 ```
 
-If the API is running but the frontend reports a query timeout or the backend logs
-`failed to resolve host 'db'`, the database service is not reachable from the API
-process. Start the Compose database or configure `DATABASE_URL` for a locally reachable
-PostgreSQL instance.
+If the API is running but I see a query timeout, or the backend logs
+`failed to resolve host 'db'`, the API cannot reach PostgreSQL. I start the Compose
+database or point `DATABASE_URL` at a PostgreSQL instance that is reachable from the API.
 
-For a production-style local check, build the frontend and start FastAPI. The Dockerfile
-performs the same build in a Node stage and copies `frontend/dist` into the Python image:
+For a production-style local check, I build the frontend and start FastAPI. The Dockerfile
+does the same thing in its Node stage and copies `frontend/dist` into the Python image:
 
 ```sh
 cd frontend
@@ -323,9 +331,9 @@ The script performs an untimed embedding-model warm-up for each configuration, t
 
 ## CI
 
-GitHub Actions runs the frontend dependency safety/build gate (`npm ci`, high-severity
-`npm audit`, and `npm run build`), Ruff, Black, pytest, Docker Compose validation,
-Postgres/pgvector checks, the vector benchmark, and the credential-free Chinook evaluator
-smoke test. The smoke test validates EX, AST, and result execution against the seeded gold
-SQL without calling Gemini. BIRD Mini-Dev is intentionally excluded from push/PR CI and
-should run manually or nightly.
+When I push or open a pull request, GitHub Actions checks the frontend first with `npm ci`,
+`npm audit --audit-level=high`, and `npm run build`. It then runs Ruff, Black, pytest,
+Docker Compose validation, the Postgres/pgvector checks, the vector benchmark, and the
+credential-free Chinook evaluator smoke test. That smoke test uses seeded gold SQL, so it
+checks the evaluator and database fixture without calling Gemini. I keep BIRD Mini-Dev out
+of push/PR CI and run it manually or nightly when its local data is available.
