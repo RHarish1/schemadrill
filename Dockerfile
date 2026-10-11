@@ -22,4 +22,4 @@ COPY evaluation ./evaluation
 COPY scripts ./scripts
 COPY --from=frontend-build /frontend/dist ./frontend/dist
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
