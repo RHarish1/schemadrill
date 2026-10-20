@@ -18,7 +18,22 @@ function App() {
   const [apiOnline, setApiOnline] = useState(null);
 
   useEffect(() => {
-    checkHealth().then(() => setApiOnline(true)).catch(() => setApiOnline(false));
+    let cancelled = false;
+    const checkApiHealth = () => {
+      checkHealth()
+        .then(() => {
+          if (!cancelled) setApiOnline(true);
+        })
+        .catch(() => {
+          if (!cancelled) setApiOnline(false);
+        });
+    };
+    checkApiHealth();
+    const healthCheckInterval = window.setInterval(checkApiHealth, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(healthCheckInterval);
+    };
   }, []);
 
   async function submitQuery(event) {
@@ -33,6 +48,7 @@ function App() {
       if (payload.status === "failed") {
         setError({ message: payload.reason || "The query could not be executed.", details: payload });
       } else {
+        setApiOnline(true);
         setResult({ ...payload, question: cleanQuestion });
       }
     } catch (requestError) {
