@@ -438,7 +438,21 @@ python -m evaluation.runner \
 
 You do not need a remote PostgreSQL instance for local development. Compose starts `pgvector/pg16`, creates the `schemadrill` database, enables the vector extension, creates the HNSW-backed `schema_embeddings` table, and loads the demo `chinook` schema.
 
-A remote instance such as Neon is optional for shared or deployed environments. Set both `DATABASE_URL` and `INGEST_DATABASE_URL` to that instance, enable the `vector` extension, run `scripts/init.sql`, create/load the target schemas, and run ingestion before calling `/query`.
+A remote instance such as Neon is optional for shared or deployed environments. Set both
+`DATABASE_URL` and `INGEST_DATABASE_URL` to that instance, enable the `vector` extension,
+run `scripts/init.sql`, create/load the target schemas, and run ingestion before calling
+`/query`. The benchmark fixture migration creates `ecommerce`, `organization`, and
+`complex_synthetic`, but schema ingestion is a separate step:
+
+```sh
+python -m ingest.schema_ingest chinook
+python -m ingest.schema_ingest ecommerce
+python -m ingest.schema_ingest organization
+python -m ingest.schema_ingest complex_synthetic
+```
+
+The ingestion command uses autocommit because embedding generation can take longer than a
+remote PostgreSQL idle-in-transaction timeout.
 
 ## Local Checks and CI Reproduction
 
