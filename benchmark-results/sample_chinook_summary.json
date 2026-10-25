@@ -1,0 +1,60 @@
+{
+  "artifacts": {
+    "jsonl": {
+      "default": "/tmp/schemadrill-instrumented-run/3cae9868becb4bac92824f10560903a3_default.jsonl"
+    },
+    "summary_json": "/tmp/schemadrill-instrumented-run/3cae9868becb4bac92824f10560903a3_summary.json",
+    "summary_markdown": "/tmp/schemadrill-instrumented-run/3cae9868becb4bac92824f10560903a3_summary.md"
+  },
+  "configurations": {
+    "default": {
+      "configuration": {
+        "disable_self_correction": false,
+        "enable_fk_expansion": false,
+        "name": "default"
+      },
+      "dataset": "chinook",
+      "estimated_cost": null,
+      "evaluation_overhead_ms": {
+        "mean": 6.966997000000001,
+        "median": 4.170617,
+        "p90": 14.312689200000001,
+        "p95": 17.1638086
+      },
+      "failure_breakdown": {},
+      "latency_ms": {
+        "mean": 7.041391999973712,
+        "median": 4.242166999802066,
+        "p95": 17.24614580002708
+      },
+      "mean_retries": 0.0,
+      "model_calls_per_question": 0.0,
+      "pipeline_latency_ms": {
+        "mean": null,
+        "median": null,
+        "p90": null,
+        "p95": null
+      },
+      "result_set_accuracy": 1.0,
+      "sql_execution_success_rate": 1.0,
+      "stage_statistics": {},
+      "tokens": {
+        "input": null,
+        "mean_input": null,
+        "mean_output": null,
+        "output": null,
+        "questions_with_usage": 0
+      },
+      "total_questions": 5
+    }
+  },
+  "dataset": "chinook",
+  "dataset_path": "evaluation/chinook/cases.json",
+  "dataset_sha256": "7986a4eddd89d74a6f3be14c98c5897091be8fa3aa7b576d39f73ee8d0b05a52",
+  "git_commit": "ceddb449b779c2a755137071b9ffd424e4bd7976",
+  "model": "gemini-3.1-flash-lite",
+  "question_count": 5,
+  "random_seed": null,
+  "run_id": "3cae9868becb4bac92824f10560903a3",
+  "timestamp": "2026-10-25T06:11:23.381639+00:00"
+}
