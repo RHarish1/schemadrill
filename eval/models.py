@@ -22,6 +22,8 @@ class SQLEvalResult(BaseModel):
     generated_columns: list[str] | None = None
     gold_execution_time_ms: float | None = None
     generated_execution_time_ms: float | None = None
+    comparison_time_ms: float | None = None
+    evaluation_time_ms: float | None = None
 
     @model_validator(mode="before")
     @classmethod

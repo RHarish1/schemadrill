@@ -68,6 +68,14 @@ jobs:
       - run: docker compose run --rm app python -m eval.benchmark
       - name: Run Chinook evaluator smoke test
         run: docker compose run --rm app python -m evaluation.runner --gold-as-generated --dataset chinook
+      - name: Run instrumented benchmark smoke test
+        run: |
+          docker compose run --rm app python -m evaluation.run_benchmark \
+            --questions evaluation/chinook/cases.json \
+            --dataset chinook \
+            --gold-as-generated \
+            --output-dir /tmp/schemadrill-benchmark
+          test -s /tmp/schemadrill-benchmark/*_summary.json
       - run: docker compose up -d app
       - name: Check API health
         run: |
