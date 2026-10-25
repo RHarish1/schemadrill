@@ -113,6 +113,33 @@ docker compose logs -f app
 
 The API uses a read-only Postgres role. `sql_guard` is a deterministic defense-in-depth boundary before `EXPLAIN`: only single SELECT statements are allowed, physical tables are checked against the retrieved/RBAC scope, privileged PostgreSQL functions are blocked, and a configured maximum LIMIT is injected or enforced. PostgreSQL RBAC remains the final security boundary.
 
+### Reliability controls
+
+The API has three deliberately separate retry/control layers:
+
+- **Request admission:** Redis atomically counts requests per client address in a fixed
+  window. Exceeded limits return `429` with `Retry-After`.
+- **Concurrency admission:** `/query` permits only `MAX_CONCURRENT_QUERIES` active
+  operations. Requests that cannot acquire a slot within `CONCURRENCY_WAIT_SECONDS`
+  return `503`; they are not queued without bound.
+- **Provider retry:** only the Gemini provider call retries transport timeouts,
+  connection failures, `429`, and provider `5xx` responses. It uses bounded exponential
+  backoff and jitter and honors a provider `Retry-After`. Authentication errors,
+  malformed requests, SQL validation failures, and database errors are not retried by
+  this layer. The Gemini SDK's own retry count is set to one so retries are not multiplied.
+
+Local Compose starts Redis automatically. For a multi-instance deployment, set `REDIS_URL`
+to a shared managed Redis instance; an in-memory fallback cannot provide a global limit.
+`REDIS_FAIL_OPEN=false` returns `503` when Redis is unavailable, while `true` preserves
+availability without enforcing the distributed limit and should be used only deliberately.
+
+Configuration variables include `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`,
+`MAX_CONCURRENT_QUERIES`, `CONCURRENCY_WAIT_SECONDS`, `PROVIDER_MAX_ATTEMPTS`,
+`PROVIDER_BACKOFF_BASE_SECONDS`, `PROVIDER_BACKOFF_MAX_SECONDS`,
+`PROVIDER_BACKOFF_JITTER_SECONDS`, and `PROVIDER_TIMEOUT_SECONDS`. Retry and admission
+events are emitted as structured event logs without prompts, SQL, credentials, or result
+values.
+
 ## Interactive Frontend
 
 When I open the frontend, I get a small React/Vite Text-to-SQL workspace rather than a
