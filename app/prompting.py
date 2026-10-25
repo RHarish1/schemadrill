@@ -1,4 +1,3 @@
-import json
 import logging
 
 from app.models import DDLBlock, RetryState
@@ -35,7 +34,7 @@ def build_messages(
             "content": f"Schema context:\n{schema_context}\n\nQuestion:\n{question}{retry_context}",
         },
     ]
-    logger.info("gemini_prompt messages=%s", json.dumps(messages, ensure_ascii=True))
+    logger.info("gemini_prompt message_count=%d", len(messages))
     return messages
 
 

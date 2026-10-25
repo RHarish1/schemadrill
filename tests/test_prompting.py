@@ -19,7 +19,7 @@ def test_gemini_prompt_is_logged(caplog):
         )
 
     assert "gemini_prompt" in caplog.text
-    assert "List artists" in caplog.text
+    assert "List artists" not in caplog.text
 
 
 def test_retry_prompt_token_count_does_not_accumulate_history():
