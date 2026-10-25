@@ -382,6 +382,39 @@ DATASETS = {
 }
 
 
+DATASET_METADATA = {
+    "chinook": {
+        "label": "Chinook",
+        "description": "Demo music catalogue",
+    },
+    "ecommerce": {
+        "label": "E-commerce",
+        "description": "Orders and products",
+    },
+    "organization": {
+        "label": "Organization",
+        "description": "Employees and projects",
+    },
+    "complex_synthetic": {
+        "label": "Complex synthetic",
+        "description": "Multi-tenant relationships and events",
+    },
+}
+
+
+def dataset_catalog() -> list[dict[str, str]]:
+    """Return the curated datasets exposed to API consumers."""
+    return [
+        {
+            "id": dataset_id,
+            "label": DATASET_METADATA[dataset_id]["label"],
+            "description": DATASET_METADATA[dataset_id]["description"],
+        }
+        for dataset_id in DATASETS
+        if dataset_id in DATASET_METADATA
+    ]
+
+
 def get_dataset(dataset_id: str) -> BenchmarkDataset:
     try:
         return DATASETS[dataset_id]
