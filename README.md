@@ -574,6 +574,14 @@ because fixture initialization mutates the selected database. Every generated ar
 contains the dataset ID, dataset version, content hash, and configuration. Existing
 `--questions evaluation/chinook/cases.json` invocations remain supported.
 
+For an explicitly approved Neon benchmark database, apply
+[`scripts/load_benchmark_datasets.sql`](scripts/load_benchmark_datasets.sql) using the
+direct/unpooled Neon connection, then run the benchmark without `--initialize`. The
+checked-in migration is additive and idempotent, grants read access to the existing
+`schemadrill_readonly` role, and should not be applied to an unintended production
+branch. The three schemas were verified against Neon with 23/23 gold queries succeeding
+and 100% result-set accuracy on 2026-10-25.
+
 ## CI
 
 When I push or open a pull request, GitHub Actions checks the frontend first with `npm ci`,
