@@ -70,12 +70,22 @@ jobs:
         run: docker compose run --rm app python -m evaluation.runner --gold-as-generated --dataset chinook
       - name: Run instrumented benchmark smoke test
         run: |
-          docker compose run --rm app python -m evaluation.run_benchmark \
-            --questions evaluation/chinook/cases.json \
-            --dataset chinook \
-            --gold-as-generated \
-            --output-dir /tmp/schemadrill-benchmark
-          test -s /tmp/schemadrill-benchmark/*_summary.json
+          docker compose run --rm app sh -c \
+            'python -m evaluation.run_benchmark \
+              --questions evaluation/chinook/cases.json \
+              --dataset chinook \
+              --gold-as-generated \
+              --output-dir /tmp/schemadrill-benchmark &&
+             test -n "$(find /tmp/schemadrill-benchmark -name "*_summary.json" -size +0c -print -quit)"'
+      - name: Run synthetic dataset registry smoke test
+        run: |
+          docker compose run --rm app sh -c \
+            'python -m evaluation.run_benchmark \
+              --all-datasets \
+              --gold-as-generated \
+              --initialize \
+              --output-dir /tmp/schemadrill-multidataset &&
+             test -n "$(find /tmp/schemadrill-multidataset -name "*_summary.json" -size +0c -print -quit)"'
       - run: docker compose up -d app
       - name: Check API health
         run: |
