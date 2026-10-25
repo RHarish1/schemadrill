@@ -329,6 +329,54 @@ docker compose cp app:/tmp/schemadrill-benchmark ./benchmark-results
 
 The script performs an untimed embedding-model warm-up for each configuration, then runs the same questions with retries off/on and FK expansion off/on. It writes `no_retry_no_fk.jsonl`, `retry_no_fk.jsonl`, `no_retry_fk.jsonl`, `retry_fk.jsonl`, and `matrix_summary.json`. The summary gives accuracy deltas in percentage points and mean elapsed-time deltas in milliseconds and seconds. Keep the four raw JSONL files with the summary for reproducibility; their elapsed time includes query generation, execution, and gold/generated SQL evaluation, but excludes embedding-model download and initialization.
 
+### Reproducible benchmark harness
+
+The current harness records one JSONL result per question and a JSON/Markdown summary
+with a unique run ID, UTC timestamp, git commit, dataset hash, model, configuration,
+failure details, result-set accuracy, execution success, latency percentiles, and retries:
+
+```sh
+python -m evaluation.run_benchmark \
+  --questions evaluation/chinook/cases.json \
+  --dataset chinook \
+  --matrix \
+  --output-dir benchmark-results
+```
+
+Use repeated `--config` JSON values instead of `--matrix` for selected configurations.
+The existing `DISABLE_SELF_CORRECTION` and `ENABLE_FK_EXPANSION` settings are applied
+through the same `Settings` object used by the production pipeline. Each configuration
+gets an independent JSONL artifact. The generated-execution timing is recorded by the
+existing evaluator; retrieval, generation, validation, provider token usage, and cost
+remain `null` when the current provider/pipeline does not expose those measurements.
+Errors are truncated and redact connection credentials and API-key-shaped values.
+
+For a credential-free local/CI fixture check, use the seeded database and gold SQL as
+the generated SQL. This validates database isolation, serialization, and comparator
+semantics but is not a model-quality result:
+
+```sh
+python -m evaluation.run_benchmark \
+  --questions evaluation/chinook/cases.json \
+  --gold-as-generated \
+  --output-dir benchmark-results
+```
+
+The resulting `<run-id>_summary.md` is suitable for inclusion in the README. The
+fixture smoke run is deterministic apart from elapsed timings and its generated run ID;
+live model runs can vary with provider responses, model revisions, retrieval state, and
+database load. No token count, cost, or benchmark result is synthesized when metadata is
+unavailable.
+
+See the real local fixture output in
+[`benchmark-results/sample_chinook_summary.json`](benchmark-results/sample_chinook_summary.json).
+The latest local run used the five seeded Chinook cases and recorded 100% result-set
+accuracy and 100% SQL execution success. Its end-to-end benchmark latency averaged
+7.041 ms (p95 17.246 ms), while evaluation overhead averaged 6.967 ms (p95
+17.164 ms). Because this was `--gold-as-generated` fixture mode, model, retrieval,
+and pipeline stage timings are intentionally unavailable; these numbers are a harness
+and database-comparison baseline, not an LLM-quality claim.
+
 ## CI
 
 When I push or open a pull request, GitHub Actions checks the frontend first with `npm ci`,
