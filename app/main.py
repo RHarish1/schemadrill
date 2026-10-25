@@ -26,7 +26,7 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/datasets")
-def datasets() -> dict[str, list[dict[str, str]]]:
+def datasets() -> dict[str, list[dict[str, object]]]:
     return {"datasets": dataset_catalog()}
 
 

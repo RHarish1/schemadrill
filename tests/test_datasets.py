@@ -27,7 +27,8 @@ def test_registry_rejects_unknown_dataset():
 def test_dataset_catalog_exposes_only_curated_datasets():
     catalog = dataset_catalog()
     assert [dataset["id"] for dataset in catalog] == list(DATASETS)
-    assert all(set(dataset) == {"id", "label", "description"} for dataset in catalog)
+    assert all(set(dataset) == {"id", "label", "description", "examples"} for dataset in catalog)
+    assert all(dataset["examples"] for dataset in catalog)
     assert all(dataset["id"] != "postgres" for dataset in catalog)
 
 
