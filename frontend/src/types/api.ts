@@ -3,6 +3,16 @@ export interface QueryRequest {
   question: string;
 }
 
+export interface DatasetOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface DatasetCatalogResponse {
+  datasets: DatasetOption[];
+}
+
 export interface QueryResult {
   status: "success" | "failed";
   sql: string | null;
