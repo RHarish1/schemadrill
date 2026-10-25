@@ -15,12 +15,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+import psycopg
 
 from app.config import Settings, get_settings
 from app.instrumentation import PipelineTelemetry
 from app.models import QueryResult
 from app.pipeline import run_pipeline
 from eval.evaluator import evaluate_sql_pair
+from evaluation.datasets import dataset_questions, get_dataset
 
 MATRIX_CONFIGS = (
     {"name": "no_retry_no_fk", "disable_self_correction": True, "enable_fk_expansion": False},
@@ -215,6 +219,7 @@ def run_configuration(
     *,
     base_settings: Settings | None = None,
     pipeline: Callable[..., QueryResult] = run_pipeline,
+    run_id: str | None = None,
 ) -> list[dict[str, Any]]:
     settings = _config_settings(base_settings or get_settings(), config)
     records: list[dict[str, Any]] = []
@@ -277,6 +282,10 @@ def run_configuration(
                 }
             record = {
                 **record,
+                "run_id": run_id,
+                "configuration": config,
+                "difficulty": question.get("difficulty"),
+                "comparison": question.get("comparison", "unordered"),
                 "retrieval_time_ms": None,
                 "generation_time_ms": None,
                 "validation_time_ms": None,
@@ -286,6 +295,10 @@ def run_configuration(
             record = _failed_evaluation(question_id, question["gold_sql"], error)
             record.update(
                 dataset=dataset,
+                run_id=run_id,
+                configuration=config,
+                difficulty=question.get("difficulty"),
+                comparison=question.get("comparison", "unordered"),
                 input_tokens=None,
                 output_tokens=None,
                 estimated_cost=None,
@@ -318,7 +331,7 @@ def _readonly_connection() -> Any:
 
 
 def run_benchmark(
-    questions_path: str | Path,
+    questions_path: str | Path | None,
     output_dir: str | Path,
     *,
     dataset: str | None = None,
@@ -327,14 +340,22 @@ def run_benchmark(
     seed: int | None = None,
     base_settings: Settings | None = None,
     gold_as_generated: bool = False,
+    initialize: bool = False,
 ) -> dict[str, Any]:
-    question_path = Path(questions_path)
-    questions = json.loads(question_path.read_text(encoding="utf-8"))
+    dataset_definition = get_dataset(dataset or "chinook")
+    question_path = Path(questions_path) if questions_path else None
+    questions = (
+        json.loads(question_path.read_text(encoding="utf-8"))
+        if question_path
+        else dataset_questions(dataset_definition.dataset_id)
+    )
     if limit is not None:
         questions = questions[:limit]
     if not questions:
         raise ValueError("No benchmark questions selected")
-    dataset_name = dataset or question_path.stem
+    dataset_name = dataset or dataset_definition.dataset_id
+    if initialize:
+        initialize_dataset(dataset_definition, base_settings or get_settings())
     selected_configs = configs or [
         {"name": "default", "disable_self_correction": False, "enable_fk_expansion": False}
     ]
@@ -349,6 +370,7 @@ def run_benchmark(
             dataset_name,
             config,
             base_settings=base_settings,
+            run_id=run_id,
             pipeline=(
                 lambda question, db, **kwargs: (
                     QueryResult(
@@ -375,8 +397,24 @@ def run_benchmark(
         "timestamp": timestamp,
         "git_commit": _git_commit(),
         "dataset": dataset_name,
-        "dataset_path": str(question_path),
-        "dataset_sha256": dataset_hash(question_path),
+        "dataset_path": str(question_path) if question_path else f"registry:{dataset_name}",
+        "dataset_sha256": (
+            dataset_hash(question_path)
+            if question_path
+            else hashlib.sha256(
+                json.dumps(
+                    {
+                        "version": dataset_definition.version,
+                        "schema_sql": dataset_definition.schema_sql,
+                        "questions": questions,
+                    },
+                    sort_keys=True,
+                    default=str,
+                ).encode()
+            ).hexdigest()
+        ),
+        "dataset_version": dataset_definition.version,
+        "dialect": dataset_definition.dialect,
         "model": (base_settings or get_settings()).model_name,
         "random_seed": seed,
         "question_count": len(questions),
@@ -393,6 +431,17 @@ def run_benchmark(
     }
     summary_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return metadata
+
+
+def initialize_dataset(dataset: Any, settings: Settings) -> None:
+    """Initialize only an explicitly selected local fixture database."""
+    parsed = urlparse(settings.ingest_database_url)
+    if parsed.hostname not in {"localhost", "127.0.0.1", "db"}:
+        raise RuntimeError(
+            "Refusing benchmark fixture initialization outside a local database host"
+        )
+    with psycopg.connect(settings.ingest_database_url) as connection:
+        dataset.seed(connection, seed=0)
 
 
 def render_markdown_summary(summary: dict[str, Any]) -> str:

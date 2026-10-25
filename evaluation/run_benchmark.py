@@ -6,12 +6,14 @@ import argparse
 import json
 
 from evaluation.benchmark import MATRIX_CONFIGS, run_benchmark
+from evaluation.datasets import DATASETS
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--questions", default="evaluation/chinook/cases.json")
-    parser.add_argument("--dataset", default="chinook")
+    parser.add_argument("--questions")
+    parser.add_argument("--dataset", choices=sorted(DATASETS), default="chinook")
+    parser.add_argument("--all-datasets", action="store_true")
     parser.add_argument("--output-dir", default="benchmark-results")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--seed", type=int)
@@ -19,6 +21,11 @@ def main() -> None:
         "--gold-as-generated",
         action="store_true",
         help="Use fixture SQL instead of an LLM for credential-free evaluator smoke runs",
+    )
+    parser.add_argument(
+        "--initialize",
+        action="store_true",
+        help="Initialize the selected fixture (local database hosts only)",
     )
     parser.add_argument(
         "--matrix",
@@ -37,16 +44,27 @@ def main() -> None:
         parser.error("--matrix and --config cannot be combined")
     if args.matrix:
         configs = list(MATRIX_CONFIGS)
-    summary = run_benchmark(
-        args.questions,
-        args.output_dir,
-        dataset=args.dataset,
-        configs=configs,
-        limit=args.limit,
-        seed=args.seed,
-        gold_as_generated=args.gold_as_generated,
+    datasets = list(DATASETS) if args.all_datasets else [args.dataset]
+    summaries = {}
+    for dataset in datasets:
+        summary = run_benchmark(
+            args.questions if len(datasets) == 1 else None,
+            args.output_dir,
+            dataset=dataset,
+            configs=configs,
+            limit=args.limit,
+            seed=args.seed,
+            gold_as_generated=args.gold_as_generated,
+            initialize=args.initialize,
+        )
+        summaries[dataset] = summary
+    print(
+        json.dumps(
+            summaries if len(summaries) > 1 else next(iter(summaries.values())),
+            indent=2,
+            sort_keys=True,
+        )
     )
-    print(json.dumps(summary, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
