@@ -538,6 +538,42 @@ included) and never sum nested spans into a wall-clock total. Compare reports by
 matching dataset hashes, model identifiers, configuration fields, and the
 `pipeline_latency_ms` and `evaluation_overhead_ms` distributions.
 
+### Benchmark dataset catalog
+
+The registry supports four local PostgreSQL datasets. Chinook remains the compatibility
+baseline; the other three are compact synthetic fixtures and do not establish
+real-world generalization or production performance.
+
+| Dataset | Version | Tables and relationships | Questions | Coverage |
+|---|---|---|---:|---|
+| `chinook` | 1 | Existing `artist`, `album`, and `track` fixture | 5 | Baseline joins, counts, ordering, limits |
+| `ecommerce` | 1 | Customers, products, orders, order items, payments, shipments | 6 | Aggregation, `HAVING`, dates, NULLs, anti-joins, payment/order totals |
+| `organization` | 1 | Employees, departments, projects, assignments | 6 | Self-joins, correlated averages, nullable managers, many-to-many joins |
+| `complex_synthetic` | 1 | Tenant-scoped accounts/users/memberships, regions, projects, events | 6 | Composite keys, multi-hop joins, ambiguous paths, NULL project relationships |
+
+Synthetic fixtures are deterministic, seeded with fixed SQL, and use PostgreSQL syntax.
+Initialize them only against a local database:
+
+```sh
+python -m evaluation.run_benchmark \
+  --dataset ecommerce --initialize --gold-as-generated \
+  --output-dir benchmark-results
+python -m evaluation.run_benchmark \
+  --dataset organization --initialize --gold-as-generated \
+  --output-dir benchmark-results
+python -m evaluation.run_benchmark \
+  --dataset complex_synthetic --initialize --gold-as-generated \
+  --output-dir benchmark-results
+python -m evaluation.run_benchmark \
+  --all-datasets --initialize --matrix --gold-as-generated \
+  --output-dir benchmark-results
+```
+
+`--initialize` uses `INGEST_DATABASE_URL` and refuses non-local hosts. It is explicit
+because fixture initialization mutates the selected database. Every generated artifact
+contains the dataset ID, dataset version, content hash, and configuration. Existing
+`--questions evaluation/chinook/cases.json` invocations remain supported.
+
 ## CI
 
 When I push or open a pull request, GitHub Actions checks the frontend first with `npm ci`,
