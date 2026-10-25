@@ -377,6 +377,19 @@ accuracy and 100% SQL execution success. Its end-to-end benchmark latency averag
 and pipeline stage timings are intentionally unavailable; these numbers are a harness
 and database-comparison baseline, not an LLM-quality claim.
 
+Instrumented model-backed runs expose nested `pipeline`, `attempt`, `retrieval`,
+`model_call`, `sql_validation`, `sql_dry_run`, `sql_execution`, and
+`result_serialization` spans. The evaluator separately records gold execution,
+generated execution, result comparison, and evaluation overhead. Each span uses a
+monotonic nanosecond clock, records its attempt and parent span, and retains failure
+or timeout status. Retrieval table counts and context character counts are recorded
+when the retrieval provider returns them; provider token usage, provider latency, and
+cost remain unavailable unless the provider exposes them through the existing call.
+Stage summaries use linear interpolation over sorted observations (`p90` and `p95`
+included) and never sum nested spans into a wall-clock total. Compare reports by
+matching dataset hashes, model identifiers, configuration fields, and the
+`pipeline_latency_ms` and `evaluation_overhead_ms` distributions.
+
 ## CI
 
 When I push or open a pull request, GitHub Actions checks the frontend first with `npm ci`,
