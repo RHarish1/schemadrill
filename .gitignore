@@ -7,7 +7,9 @@ __pycache__/
 .mypy_cache/
 *.jsonl
 wheels/
-benchmark-results/
+benchmark-results/*
+!benchmark-results/
+!benchmark-results/sample_chinook_summary.json
 
 # Frontend dependencies and build output
 frontend/node_modules/

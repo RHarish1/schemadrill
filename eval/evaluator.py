@@ -54,6 +54,7 @@ def evaluate_sql_pair(
     generated_sql: str | None,
     connection_factory: Callable[[], Any],
 ) -> SQLEvalResult:
+    evaluation_started = time.perf_counter_ns()
     gold_columns = generated_columns = None
     gold_rows = generated_rows = None
     gold_time_ms = generated_time_ms = None
@@ -85,6 +86,7 @@ def evaluate_sql_pair(
 
     gold_executed = gold_error is None
     generated_executed = generated_error is None
+    comparison_started = time.perf_counter_ns()
     result_match = (
         gold_executed
         and generated_executed
@@ -95,6 +97,7 @@ def evaluate_sql_pair(
             generated_rows or [],
         )
     )
+    comparison_time_ms = (time.perf_counter_ns() - comparison_started) / 1_000_000
     return SQLEvalResult(
         question_id=question_id,
         gold_sql=gold_sql,
@@ -113,4 +116,6 @@ def evaluate_sql_pair(
         generated_columns=generated_columns,
         gold_execution_time_ms=gold_time_ms,
         generated_execution_time_ms=generated_time_ms,
+        comparison_time_ms=comparison_time_ms,
+        evaluation_time_ms=(time.perf_counter_ns() - evaluation_started) / 1_000_000,
     )
