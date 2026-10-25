@@ -7,6 +7,7 @@ export interface DatasetOption {
   id: string;
   label: string;
   description: string;
+  examples: string[];
 }
 
 export interface DatasetCatalogResponse {

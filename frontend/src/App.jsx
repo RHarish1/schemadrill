@@ -2,12 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiRequestError, checkHealth, listDatasets, queryDatabase } from "./services/api";
 import "./styles.css";
 
-const examples = [
-  "List all artists.",
-  "Show the 10 tracks with the longest duration.",
-  "Count the number of albums per artist.",
-];
-
 function App() {
   const [datasets, setDatasets] = useState([]);
   const [dataset, setDataset] = useState("");
@@ -16,6 +10,7 @@ function App() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [apiOnline, setApiOnline] = useState(null);
+  const selectedDataset = datasets.find((item) => item.id === dataset);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +102,7 @@ function App() {
             <textarea id="question" value={question} onChange={(event) => setQuestion(event.target.value)}
               onKeyDown={handleKeyDown} placeholder="Ask a question about your data..." rows="5" required />
             <div className="suggestions"><span>Try an example</span>
-              {examples.map((example) => <button type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}
+              {(selectedDataset?.examples || []).map((example) => <button type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}
             </div>
             <button className="run-button" type="submit" disabled={loading || !question.trim()}>
               {loading ? <><span className="spinner" /> Running query...</> : <>Run query <b>↗</b></>}

@@ -386,29 +386,50 @@ DATASET_METADATA = {
     "chinook": {
         "label": "Chinook",
         "description": "Demo music catalogue",
+        "examples": [
+            "List all artists.",
+            "Show the 10 tracks with the longest duration.",
+            "Count the number of albums per artist.",
+        ],
     },
     "ecommerce": {
         "label": "E-commerce",
         "description": "Orders and products",
+        "examples": [
+            "List customers with no orders.",
+            "Show completed order totals.",
+            "Show unshipped orders in April 2024.",
+        ],
     },
     "organization": {
         "label": "Organization",
         "description": "Employees and projects",
+        "examples": [
+            "List employees without managers.",
+            "Count employees in each department.",
+            "List managers and their direct report counts.",
+        ],
     },
     "complex_synthetic": {
         "label": "Complex synthetic",
         "description": "Multi-tenant relationships and events",
+        "examples": [
+            "List users in tenant 1 account 10.",
+            "List projects in the East region.",
+            "List direct login event users.",
+        ],
     },
 }
 
 
-def dataset_catalog() -> list[dict[str, str]]:
+def dataset_catalog() -> list[dict[str, object]]:
     """Return the curated datasets exposed to API consumers."""
     return [
         {
             "id": dataset_id,
             "label": DATASET_METADATA[dataset_id]["label"],
             "description": DATASET_METADATA[dataset_id]["description"],
+            "examples": DATASET_METADATA[dataset_id]["examples"],
         }
         for dataset_id in DATASETS
         if dataset_id in DATASET_METADATA
