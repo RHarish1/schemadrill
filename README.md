@@ -520,8 +520,8 @@ See the real local fixture output in
 [`benchmark-results/sample_chinook_summary.json`](benchmark-results/sample_chinook_summary.json).
 The latest local run used the five seeded Chinook cases and recorded 100% result-set
 accuracy and 100% SQL execution success. Its end-to-end benchmark latency averaged
-7.041 ms (p95 17.246 ms), while evaluation overhead averaged 6.967 ms (p95
-17.164 ms). Because this was `--gold-as-generated` fixture mode, model, retrieval,
+15.625 ms (p95 50.924 ms), while evaluation overhead averaged 15.544 ms (p95
+50.831 ms). Because this was `--gold-as-generated` fixture mode, model, retrieval,
 and pipeline stage timings are intentionally unavailable; these numbers are a harness
 and database-comparison baseline, not an LLM-quality claim.
 
