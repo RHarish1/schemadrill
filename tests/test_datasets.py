@@ -1,6 +1,6 @@
 import pytest
 
-from evaluation.datasets import DATASETS, dataset_questions, get_dataset
+from evaluation.datasets import DATASETS, dataset_catalog, dataset_questions, get_dataset
 
 
 def test_registry_contains_all_datasets_and_stable_questions():
@@ -22,6 +22,13 @@ def test_registry_contains_all_datasets_and_stable_questions():
 def test_registry_rejects_unknown_dataset():
     with pytest.raises(ValueError, match="Unknown benchmark dataset"):
         get_dataset("not-a-dataset")
+
+
+def test_dataset_catalog_exposes_only_curated_datasets():
+    catalog = dataset_catalog()
+    assert [dataset["id"] for dataset in catalog] == list(DATASETS)
+    assert all(set(dataset) == {"id", "label", "description"} for dataset in catalog)
+    assert all(dataset["id"] != "postgres" for dataset in catalog)
 
 
 def test_synthetic_questions_cover_expected_relationship_traps():

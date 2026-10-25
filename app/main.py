@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.db import close_pool
 from app.models import QueryRequest, QueryResult
 from app.pipeline import run_pipeline
+from evaluation.datasets import dataset_catalog
 
 
 @asynccontextmanager
@@ -22,6 +23,11 @@ app = FastAPI(title="SchemaDrill", version="0.1.0", lifespan=lifespan)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/datasets")
+def datasets() -> dict[str, list[dict[str, str]]]:
+    return {"datasets": dataset_catalog()}
 
 
 @app.post("/query", response_model=QueryResult)

@@ -1,4 +1,5 @@
 import type { QueryRequest, QueryResult } from "../types/api";
+import type { DatasetCatalogResponse } from "../types/api";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -48,6 +49,10 @@ export function queryDatabase(requestBody: QueryRequest) {
 
 export function checkHealth() {
   return request<{ status: string }>("/health");
+}
+
+export function listDatasets() {
+  return request<DatasetCatalogResponse>("/api/datasets");
 }
 
 export { ApiRequestError };

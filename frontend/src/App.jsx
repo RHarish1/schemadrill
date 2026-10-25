@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ApiRequestError, checkHealth, queryDatabase } from "./services/api";
+import { ApiRequestError, checkHealth, listDatasets, queryDatabase } from "./services/api";
 import "./styles.css";
 
-const datasets = [{ id: "chinook", name: "Chinook", description: "Demo music catalogue" }];
 const examples = [
   "List all artists.",
   "Show the 10 tracks with the longest duration.",
@@ -10,7 +9,8 @@ const examples = [
 ];
 
 function App() {
-  const [dataset, setDataset] = useState(datasets[0].id);
+  const [datasets, setDatasets] = useState([]);
+  const [dataset, setDataset] = useState("");
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -18,7 +18,31 @@ function App() {
   const [apiOnline, setApiOnline] = useState(null);
 
   useEffect(() => {
-    checkHealth().then(() => setApiOnline(true)).catch(() => setApiOnline(false));
+    let cancelled = false;
+    listDatasets()
+      .then(({ datasets: availableDatasets }) => {
+        if (cancelled) return;
+        setDatasets(availableDatasets);
+        setDataset((currentDataset) => currentDataset || availableDatasets[0]?.id || "");
+      })
+      .catch(() => {
+        if (!cancelled) setDatasets([]);
+      });
+    const checkApiHealth = () => {
+      checkHealth()
+        .then(() => {
+          if (!cancelled) setApiOnline(true);
+        })
+        .catch(() => {
+          if (!cancelled) setApiOnline(false);
+        });
+    };
+    checkApiHealth();
+    const healthCheckInterval = window.setInterval(checkApiHealth, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(healthCheckInterval);
+    };
   }, []);
 
   async function submitQuery(event) {
@@ -75,8 +99,8 @@ function App() {
           <form className="query-panel" onSubmit={submitQuery}>
             <div className="panel-heading"><span><b>01</b> Ask your data</span><em>READ ONLY</em></div>
             <label htmlFor="dataset">Dataset</label>
-            <select id="dataset" value={dataset} onChange={(event) => setDataset(event.target.value)}>
-              {datasets.map((item) => <option value={item.id} key={item.id}>{item.name} — {item.description}</option>)}
+            <select id="dataset" value={dataset} onChange={(event) => setDataset(event.target.value)} disabled={!datasets.length}>
+              {datasets.length ? datasets.map((item) => <option value={item.id} key={item.id}>{item.label} — {item.description}</option>) : <option value="">No datasets available</option>}
             </select>
             <label htmlFor="question">What do you want to know?</label>
             <textarea id="question" value={question} onChange={(event) => setQuestion(event.target.value)}
