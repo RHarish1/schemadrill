@@ -47,7 +47,7 @@ def table_ddl(connection: psycopg.Connection, schema_name: str, table_name: str)
 
 def ingest_schema(schema_name: str) -> None:
     settings = get_settings()
-    with psycopg.connect(settings.ingest_database_url) as connection:
+    with psycopg.connect(settings.ingest_database_url, autocommit=True) as connection:
         register_vector(connection)
         tables = connection.execute(
             """
