@@ -121,6 +121,22 @@ The matrix compares four independently recorded configurations:
 Each report includes result-set accuracy, SQL execution success, retries, token usage
 when available, stage timings, and mean/median/p95 elapsed time.
 
+To repeat every configuration three times and include the full-schema baseline:
+
+```sh
+docker compose run --rm app python -m evaluation.run_benchmark \
+  --questions evaluation/chinook/cases.json \
+  --dataset chinook \
+  --matrix \
+  --repetitions 3 \
+  --gold-as-generated \
+  --output-dir /tmp/schemadrill-ablation
+```
+
+`full_schema` reads every stored table DDL directly and does not embed the question.
+The other configurations use the pgvector top-k path. The repeated JSONL files and
+summary metadata are kept separately so run-to-run variance is visible.
+
 ### BIRD Mini-Dev
 
 BIRD is not bundled because its license and database dumps are external. After placing

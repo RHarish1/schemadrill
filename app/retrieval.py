@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.db import readonly_connection
 from app.embedding import embed_query
 from app.models import DDLBlock, RetrievalResult
+from app.schema import table_ddl
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,11 @@ class PgVectorRetrievalProvider:
         self.settings = settings
 
     def retrieve(self, question: str, db: str, top_k: int) -> list[DDLBlock] | RetrievalResult:
-        blocks = _retrieve_pgvector(question, db, top_k)
+        blocks = (
+            _retrieve_full_schema(db)
+            if self.settings.full_schema_retrieval
+            else _retrieve_pgvector(question, db, top_k)
+        )
         if not self.settings.enable_fk_expansion:
             table_names = [f"{block.schema_name}.{block.table_name}" for block in blocks]
             logger.info(
@@ -97,6 +102,36 @@ def _retrieve_pgvector(question: str, db: str, top_k: int) -> list[DDLBlock]:
         ],
     )
     return [DDLBlock(**row) for row in rows]
+
+
+def _retrieve_full_schema(db: str) -> list[DDLBlock]:
+    with readonly_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = %s AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+                """,
+                (db,),
+            )
+            rows = cursor.fetchall()
+        blocks = [
+            DDLBlock(
+                schema_name=db,
+                table_name=row["table_name"],
+                ddl_text=table_ddl(connection, db, row["table_name"]),
+            )
+            for row in rows
+        ]
+    logger.info(
+        "full_schema_results db=%s tables=%d context_characters=%d",
+        db,
+        len(blocks),
+        sum(len(block.ddl_text) for block in blocks),
+    )
+    return blocks
 
 
 def _retrieve_with_fk_expansion(blocks: list[DDLBlock], db: str) -> RetrievalResult:

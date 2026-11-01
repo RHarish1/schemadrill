@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="benchmark-results")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument(
         "--gold-as-generated",
         action="store_true",
@@ -56,6 +57,7 @@ def main() -> None:
             seed=args.seed,
             gold_as_generated=args.gold_as_generated,
             initialize=args.initialize,
+            repetitions=args.repetitions,
         )
         summaries[dataset] = summary
     print(

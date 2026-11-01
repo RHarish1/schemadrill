@@ -31,6 +31,12 @@ MATRIX_CONFIGS = (
     {"name": "retry_no_fk", "disable_self_correction": False, "enable_fk_expansion": False},
     {"name": "no_retry_fk", "disable_self_correction": True, "enable_fk_expansion": True},
     {"name": "retry_fk", "disable_self_correction": False, "enable_fk_expansion": True},
+    {
+        "name": "full_schema",
+        "disable_self_correction": False,
+        "enable_fk_expansion": False,
+        "full_schema_retrieval": True,
+    },
 )
 
 _SECRET_PATTERNS = (
@@ -91,6 +97,7 @@ def _config_settings(base: Settings, config: dict[str, Any]) -> Settings:
     values.update(
         disable_self_correction=bool(config["disable_self_correction"]),
         enable_fk_expansion=bool(config["enable_fk_expansion"]),
+        full_schema_retrieval=bool(config.get("full_schema_retrieval", False)),
     )
     return Settings(**values)
 
@@ -341,6 +348,7 @@ def run_benchmark(
     base_settings: Settings | None = None,
     gold_as_generated: bool = False,
     initialize: bool = False,
+    repetitions: int = 1,
 ) -> dict[str, Any]:
     dataset_definition = get_dataset(dataset or "chinook")
     question_path = Path(questions_path) if questions_path else None
@@ -353,6 +361,8 @@ def run_benchmark(
         questions = questions[:limit]
     if not questions:
         raise ValueError("No benchmark questions selected")
+    if repetitions < 1:
+        raise ValueError("repetitions must be at least 1")
     dataset_name = dataset or dataset_definition.dataset_id
     if initialize:
         initialize_dataset(dataset_definition, base_settings or get_settings())
@@ -365,32 +375,53 @@ def run_benchmark(
     output.mkdir(parents=True, exist_ok=True)
     summaries: dict[str, Any] = {}
     for config in selected_configs:
-        records = run_configuration(
-            questions,
-            dataset_name,
-            config,
-            base_settings=base_settings,
-            run_id=run_id,
-            pipeline=(
-                lambda question, db, **kwargs: (
-                    QueryResult(
-                        status="success",
-                        sql=next(
-                            item["gold_sql"] for item in questions if item["question"] == question
-                        ),
-                        attempts=1,
+        repetitions_summary = []
+        for repetition in range(1, repetitions + 1):
+            records = run_configuration(
+                questions,
+                dataset_name,
+                config,
+                base_settings=base_settings,
+                run_id=run_id,
+                pipeline=(
+                    lambda question, db, **kwargs: (
+                        QueryResult(
+                            status="success",
+                            sql=next(
+                                item["gold_sql"]
+                                for item in questions
+                                if item["question"] == question
+                            ),
+                            attempts=1,
+                        )
+                        if gold_as_generated
+                        else run_pipeline(question, db, **kwargs)
                     )
-                    if gold_as_generated
-                    else run_pipeline(question, db, **kwargs)
-                )
-            ),
+                ),
+            )
+            filename = output / f"{run_id}_{config['name']}_run{repetition}.jsonl"
+            filename.write_text(
+                "".join(
+                    json.dumps(record, sort_keys=True, default=str) + "\n" for record in records
+                ),
+                encoding="utf-8",
+            )
+            repetitions_summary.append(
+                {
+                    "repetition": repetition,
+                    "summary": aggregate_records(records, dataset_name, config),
+                    "output": str(filename),
+                }
+            )
+        summaries[config["name"]] = (
+            repetitions_summary[0]["summary"]
+            if repetitions == 1
+            else {
+                "configuration": config,
+                "repetitions": repetitions_summary,
+                "repetition_count": repetitions,
+            }
         )
-        filename = output / f"{run_id}_{config['name']}.jsonl"
-        filename.write_text(
-            "".join(json.dumps(record, sort_keys=True, default=str) + "\n" for record in records),
-            encoding="utf-8",
-        )
-        summaries[config["name"]] = aggregate_records(records, dataset_name, config)
 
     metadata = {
         "run_id": run_id,
@@ -418,6 +449,7 @@ def run_benchmark(
         "model": (base_settings or get_settings()).model_name,
         "random_seed": seed,
         "question_count": len(questions),
+        "repetitions": repetitions,
         "configurations": summaries,
     }
     summary_path = output / f"{run_id}_summary.json"
@@ -427,7 +459,14 @@ def run_benchmark(
     metadata["artifacts"] = {
         "summary_json": str(summary_path),
         "summary_markdown": str(markdown_path),
-        "jsonl": {name: str(output / f"{run_id}_{name}.jsonl") for name in summaries},
+        "jsonl": {
+            name: (
+                str(output / f"{run_id}_{name}.jsonl")
+                if repetitions == 1
+                else [item["output"] for item in summary["repetitions"]]
+            )
+            for name, summary in summaries.items()
+        },
     }
     summary_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return metadata
@@ -457,11 +496,17 @@ def render_markdown_summary(summary: dict[str, Any]) -> str:
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for name, metrics in summary["configurations"].items():
-        latency = metrics["latency_ms"]
-        lines.append(
-            f"| {name} | {metrics['result_set_accuracy']:.3f} | "
-            f"{metrics['sql_execution_success_rate']:.3f} | "
-            f"{latency['mean']:.3f} | {latency['median']:.3f} | {latency['p95']:.3f} | "
-            f"{metrics['mean_retries']:.3f} |"
+        runs = (
+            [(item["repetition"], item["summary"]) for item in metrics["repetitions"]]
+            if "repetitions" in metrics
+            else [(1, metrics)]
         )
+        for repetition, run_metrics in runs:
+            latency = run_metrics["latency_ms"]
+            lines.append(
+                f"| {name} / run {repetition} | {run_metrics['result_set_accuracy']:.3f} | "
+                f"{run_metrics['sql_execution_success_rate']:.3f} | "
+                f"{latency['mean']:.3f} | {latency['median']:.3f} | {latency['p95']:.3f} | "
+                f"{run_metrics['mean_retries']:.3f} |"
+            )
     return "\n".join(lines) + "\n"
