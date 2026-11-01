@@ -1,96 +1,74 @@
 # SchemaDrill
 
-I built SchemaDrill to let me ask a PostgreSQL database questions in plain English. It
-retrieves the most relevant schema, asks Gemini to write a read-only query, checks that
-query, and runs it with a small, bounded retry loop when correction is needed.
+SchemaDrill is a PostgreSQL text-to-SQL service. It retrieves the relevant database
+schema, asks Gemini to generate a read-only query, validates that query with a
+deterministic SQL guard and PostgreSQL `EXPLAIN`, then executes it with bounded retries.
+The repository also contains a reproducible evaluation harness and a small React client.
+
+## What is implemented
+
+- FastAPI query API with structured results and OpenAPI documentation
+- PostgreSQL/pgvector schema retrieval with optional foreign-key expansion
+- Gemini SQL generation with bounded, stateless self-correction
+- SQL allowlisting, table-scope checks, blocked-function checks, and result-row limits
+- Read-only PostgreSQL execution and structured telemetry
+- Redis request rate limiting, concurrency admission, and provider retry controls
+- React/Vite frontend served by the same container
+- Chinook regression fixtures and BIRD Mini-Dev evaluation support
+- Evaluation metrics for result-set accuracy, execution success, AST similarity,
+  retries, token usage, stage timing, and mean/median/p95 latency
+
+The checked-in Chinook fixture is deterministic and intended for smoke tests. BIRD
+Mini-Dev is external and must be downloaded separately. See
+[evaluation/bird/README.md](evaluation/bird/README.md).
 
 ## Architecture
 
-GitHub renders this Mermaid diagram directly in the README. It shows the request path, optional schema expansion, retry feedback, and the separate evaluation path.
-
 ```mermaid
 flowchart LR
-    Client[Client] --> API[FastAPI query API]
-    API --> Pipe[Pipeline]
-    Pipe --> Retrieve[Question embedding and pgvector top-k]
-    Retrieve --> Expand{FK expansion enabled?}
-    Expand -- yes --> Catalog[Information schema one-hop neighbors]
-    Catalog --> DDL[Fetch neighbor DDL from schema_embeddings]
-    Expand -- no --> Context
-    DDL --> Context[Final retrieved schema context]
-    Context --> Prompt[Prompt with question and retry feedback]
-    Prompt --> Gemini[Gemini SQL generation]
-    Gemini --> Guard[SQL guard and authorized table scope]
-    Guard --> DryRun[PostgreSQL EXPLAIN]
-    DryRun -->|Rejected or invalid, retries remain| Prompt
-    DryRun -->|Accepted| Execute[Read-only bounded execution]
+    Client --> API[FastAPI]
+    API --> Retrieval[Schema retrieval]
+    Retrieval --> Prompt[Gemini prompt]
+    Prompt --> Guard[SQL guard]
+    Guard --> Explain[PostgreSQL EXPLAIN]
+    Explain --> Execute[Bounded read-only execution]
     Execute --> API
-    API --> Client
-
-    Questions[Benchmark questions and gold SQL] --> Runner[Evaluation runner]
-    Runner --> Pipe
-    Runner --> Compare[Execute gold and generated SQL]
-    Compare --> Metrics[Result-set accuracy, success, AST match, elapsed time]
+    Questions[Gold questions] --> Evaluation[Evaluation runner]
+    Evaluation --> Metrics[Result accuracy and latency metrics]
 ```
 
-See [docs/modules.md](docs/modules.md) for the module-by-module ownership map and [docs/implementation-notes.md](docs/implementation-notes.md) for the implementation decisions and troubleshooting history.
+See [docs/modules.md](docs/modules.md) for the module map and
+[docs/implementation-notes.md](docs/implementation-notes.md) for technical history.
 
-## Current v0 Status
+## Local development
 
-The v0 runtime is complete enough for local experimentation: Docker Compose gives me
-PostgreSQL and pgvector, the local embedding model retrieves schema context, Gemini
-generates structured SQL, PostgreSQL validates it, and the executor keeps reads bounded.
-The API returns both the original Markdown representation and structured rows for the
-frontend.
-
-The evaluation harness distinguishes generated-query execution success, result-based Execution Accuracy (EX), AST similarity, result metadata, and SQL execution timing. Chinook is the fast deterministic regression dataset. BIRD Mini-Dev is an opt-in evaluation dataset and is not run on every push.
-
-I am keeping the first version deliberately small. The checked-in dataset is deterministic
-Chinook smoke data rather than a full Spider/BIRD installation. Database RBAC is still the
-final security boundary, while evaluation, result comparison, tracing, and dashboards stay
-separate from the interactive playground.
-
-## Run Locally
-
-Prerequisites: Docker with Compose and a Gemini API key.
+Requirements: Docker with Compose, Python 3.12, Node.js 20 for frontend development,
+and a Gemini API key for live generation.
 
 ```sh
 cp .env.example .env
-# Put a Gemini Developer API key in GEMINI_API_KEY inside .env.
+# Set GEMINI_API_KEY in .env.
 docker compose up -d --build
-```
-
-Wait until both services are healthy:
-
-```sh
 docker compose ps
-curl http://localhost:8000/health
+curl --fail http://localhost:8000/health
 ```
 
-The first ingestion loads `BAAI/bge-small-en-v1.5` on CPU. Ingest the demo Chinook schema once after the database is ready:
+The database seed creates the Chinook fixture. Ingest its schema embeddings once:
 
 ```sh
 docker compose exec app python -m ingest.schema_ingest chinook
 ```
 
-The Compose database seed creates five deterministic Chinook cases with artists, albums, and tracks. To start from a clean database and reload the schema and rows:
-
-```sh
-docker compose down -v
-docker compose up -d db
-docker compose exec app python -m ingest.schema_ingest chinook
-```
-
-Open Swagger at <http://localhost:8000/docs> or call the API:
+Use the API:
 
 ```sh
 curl -X POST http://localhost:8000/query \
- -H 'Content-Type: application/json' \
- -d '{"db":"chinook","question":"List the names of all artists."}'
+  -H 'Content-Type: application/json' \
+  -d '{"db":"chinook","question":"List the names of all artists."}'
 ```
 
-Open <http://localhost:8000/> for the built-in React frontend. For frontend development,
-run the API on port 8000 and then:
+Open <http://localhost:8000/> for the frontend or <http://localhost:8000/docs> for
+Swagger. For frontend-only development:
 
 ```sh
 cd frontend
@@ -98,219 +76,98 @@ npm install
 npm run dev
 ```
 
-The Vite development server is available at <http://localhost:5173/> and proxies queries
-to the API. A production Docker build compiles React and serves it from FastAPI.
-For a separately hosted API, copy `frontend/.env.example` to `frontend/.env` and set
-`VITE_API_BASE_URL` to the API origin. The interactive frontend currently exposes the
-seeded `chinook` dataset; BIRD Mini-Dev remains evaluation-only because the backend has
-no dataset discovery or interactive BIRD endpoint.
+## Evaluation and ablations
 
-View retrieval similarity scores, the exact Gemini prompt, and generated SQL:
+The evaluator compares generated and gold SQL by executing both against the same
+database. Result-set accuracy is the primary correctness metric: row order is ignored,
+duplicate rows and `NULL` values are preserved, numeric representations are normalized,
+and column order remains significant. AST similarity is reported separately as a
+diagnostic. Timing fields measure the actual run; they are not claims about a fixed
+production SLA.
 
-```sh
-docker compose logs -f app
-```
-
-The API uses a read-only Postgres role. `sql_guard` is a deterministic defense-in-depth boundary before `EXPLAIN`: only single SELECT statements are allowed, physical tables are checked against the retrieved/RBAC scope, privileged PostgreSQL functions are blocked, and a configured maximum LIMIT is injected or enforced. PostgreSQL RBAC remains the final security boundary.
-
-### Reliability controls
-
-The API has three deliberately separate retry/control layers:
-
-- **Request admission:** Redis atomically counts requests per client address in a fixed
-  window. Exceeded limits return `429` with `Retry-After`.
-- **Concurrency admission:** `/query` permits only `MAX_CONCURRENT_QUERIES` active
-  operations. Requests that cannot acquire a slot within `CONCURRENCY_WAIT_SECONDS`
-  return `503`; they are not queued without bound.
-- **Provider retry:** only the Gemini provider call retries transport timeouts,
-  connection failures, `429`, and provider `5xx` responses. It uses bounded exponential
-  backoff and jitter and honors a provider `Retry-After`. Authentication errors,
-  malformed requests, SQL validation failures, and database errors are not retried by
-  this layer. The Gemini SDK's own retry count is set to one so retries are not multiplied.
-
-Local Compose starts Redis automatically. For a multi-instance deployment, set `REDIS_URL`
-to a shared managed Redis instance; an in-memory fallback cannot provide a global limit.
-`REDIS_FAIL_OPEN=false` returns `503` when Redis is unavailable, while `true` preserves
-availability without enforcing the distributed limit and should be used only deliberately.
-
-Configuration variables include `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`,
-`MAX_CONCURRENT_QUERIES`, `CONCURRENCY_WAIT_SECONDS`, `PROVIDER_MAX_ATTEMPTS`,
-`PROVIDER_BACKOFF_BASE_SECONDS`, `PROVIDER_BACKOFF_MAX_SECONDS`,
-`PROVIDER_BACKOFF_JITTER_SECONDS`, and `PROVIDER_TIMEOUT_SECONDS`. Retry and admission
-events are emitted as structured event logs without prompts, SQL, credentials, or result
-values.
-
-## Interactive Frontend
-
-When I open the frontend, I get a small React/Vite Text-to-SQL workspace rather than a
-large dashboard. I can choose the verified `chinook` dataset, type a question, pick an
-example, and inspect exactly what came back from the API.
-
-### User flow
-
-1. On load, the frontend calls `GET /health`, so I can immediately see whether the API is
-   reachable.
-2. I select `chinook`, type a natural-language question, or click one of the example
-   questions.
-3. I press **Run query** or `Ctrl+Enter` / `Cmd+Enter`.
-4. The frontend sends the existing `POST /query` request:
-
-   ```json
-   {
-     "db": "chinook",
-     "question": "List all artists."
-   }
-   ```
-
-5. While it runs, the button is disabled and I see a loading state. The browser gives the
-   request 30 seconds before showing a timeout.
-6. When it succeeds, I see a scrollable results table, dynamic columns, row and column
-   counts, the retry count, the generated SQL, and expandable execution details.
-7. `NULL` values stay visibly different from empty strings. I can copy the SQL or download
-   the returned rows as CSV.
-8. If the API or pipeline fails, the frontend shows the failure separately and leaves my
-   question in place so I can try again.
-
-I intentionally do not fabricate SQL, result rows, timing, schema scores, or evaluation
-metrics in the browser. The backend currently returns `status`, `sql`, `table_markdown`,
-`columns`, `rows`, `attempts`, and `reason`. The frontend only renders those fields. The
-older `table_markdown` field remains for compatibility; `columns` and `rows` power the
-table and CSV export.
-
-### Frontend configuration
-
-The frontend API service is in [`frontend/src/services/api.ts`](frontend/src/services/api.ts).
-If I host Vite separately from FastAPI, I set `VITE_API_BASE_URL`:
+Run the deterministic Chinook evaluator without Gemini:
 
 ```sh
-cd frontend
-cp .env.example .env
-# Example:
-# VITE_API_BASE_URL=http://localhost:8000
-npm run dev
+docker compose run --rm app \
+  python -m evaluation.runner --gold-as-generated --dataset chinook
 ```
 
-When it is blank, the frontend uses relative URLs. That is what I want for the Vite
-development proxy and for the production frontend mounted by FastAPI at
-`http://localhost:8000/`. I never put Gemini keys, database URLs, or other credentials in
-these variables because Vite exposes them to the browser.
-
-### Running the frontend and API together
-
-For local development, I start the API and frontend in separate terminals:
+Run a live benchmark:
 
 ```sh
-# Terminal 1: from the repository root
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# Terminal 2: from frontend/
-npm install
-npm run dev
+docker compose exec app python -m eval.run_benchmark \
+  --questions eval/questions.json \
+  --dataset chinook \
+  --output /tmp/schemadrill-results.jsonl
 ```
 
-Then I open <http://localhost:5173/>. The Vite proxy forwards `/health` and `/query` to
-`http://localhost:8000`. To run a real query, PostgreSQL must be running and the
-`chinook` schema must be seeded and ingested. The quickest setup is:
+Run the retry and foreign-key retrieval ablation matrix:
 
 ```sh
-docker compose up -d --build
-docker compose exec app python -m ingest.schema_ingest chinook
+docker compose exec -T app python -m eval.run_benchmark_matrix \
+  --questions eval/questions.json \
+  --db chinook \
+  --output-dir /tmp/schemadrill-ablation
+docker compose cp app:/tmp/schemadrill-ablation ./benchmark-results
 ```
 
-If the API is running but I see a query timeout, or the backend logs
-`failed to resolve host 'db'`, the API cannot reach PostgreSQL. I start the Compose
-database or point `DATABASE_URL` at a PostgreSQL instance that is reachable from the API.
+The matrix compares four independently recorded configurations:
 
-For a production-style local check, I build the frontend and start FastAPI. The Dockerfile
-does the same thing in its Node stage and copies `frontend/dist` into the Python image:
+1. no retry, no foreign-key expansion
+2. retry, no foreign-key expansion
+3. no retry, foreign-key expansion
+4. retry, foreign-key expansion
+
+Each report includes result-set accuracy, SQL execution success, retries, token usage
+when available, stage timings, and mean/median/p95 elapsed time.
+
+### BIRD Mini-Dev
+
+BIRD is not bundled because its license and database dumps are external. After placing
+the standard split at `evaluation/bird/dev.json` and loading the corresponding schemas
+into the configured PostgreSQL instance:
 
 ```sh
-cd frontend
-npm run build
-cd ..
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m evaluation.runner \
+  --bird-root evaluation/bird \
+  --split dev \
+  --gold-as-generated
 ```
 
-Then open <http://localhost:8000/>. The API documentation remains available at
-<http://localhost:8000/docs>.
-
-## Deploying to Google Cloud Run
-
-For a small public demo, I can run the container on Cloud Run and use a managed
-PostgreSQL provider that supports pgvector, such as Neon. The Docker image serves the
-React frontend and FastAPI backend together, so I do not need a second frontend service.
-Cloud Run supplies the listening port through `PORT`, and the image now uses that value
-while retaining port `8000` as the local fallback.
-
-### Before I deploy
-
-I first make sure the local stack works:
+For live generation and JSONL output:
 
 ```sh
-docker compose config -q
-docker compose up -d --build
-curl --fail http://localhost:8000/health
-docker compose logs --tail=100 app
+python -m evaluation.runner \
+  --bird-root evaluation/bird \
+  --split dev \
+  --output benchmark-results/bird-dev.jsonl
 ```
 
-I also create a PostgreSQL database with the `vector` extension and load both the
-Chinook tables and their schema embeddings. An empty remote database is not enough:
-`/query` needs the demo tables, `schema_embeddings`, and the embedding model.
+The loader accepts the standard BIRD fields `question`, `evidence`, `SQL`, and `db_id`.
+The BIRD databases must be available to the configured connection; the loader does not
+silently convert or invent database fixtures.
 
-For a managed database, I apply [`scripts/init.sql`](scripts/init.sql), apply
-[`scripts/load_demo_dbs.sql`](scripts/load_demo_dbs.sql), and then run ingestion against
-the remote database. I keep the connection strings private and never commit them:
+## Google Cloud Run
+
+The Dockerfile builds the frontend and serves it from FastAPI. Cloud Run supplies
+`PORT`, while local Compose continues to use port 8000. Use a managed PostgreSQL
+service with pgvector, such as Neon, for the runtime database; Cloud Run does not
+provide PostgreSQL.
+
+Prepare the remote database by applying [scripts/init.sql](scripts/init.sql),
+[scripts/load_demo_dbs.sql](scripts/load_demo_dbs.sql), and schema ingestion:
 
 ```sh
-docker compose build app
-docker compose run --rm \
-  -e DATABASE_URL="$REMOTE_READONLY_DATABASE_URL" \
-  -e INGEST_DATABASE_URL="$REMOTE_ADMIN_DATABASE_URL" \
-  app python -m ingest.schema_ingest chinook
+INGEST_DATABASE_URL="$REMOTE_ADMIN_DATABASE_URL" \
+  .venv/bin/python -m ingest.schema_ingest chinook
 ```
 
-The application only needs the read-only connection at runtime. I use the administrative
-connection for ingestion only, and rotate the demo credentials from the checked-in
-development values before putting the database on the public internet.
-
-For the Neon `production` branch, I use the direct (unpooled) connection for setup and
-ingestion. I run the two SQL files in this order from the Neon SQL Editor:
-
-1. [`scripts/init.sql`](scripts/init.sql) enables pgvector, creates the
-   `schema_embeddings` table and HNSW index, and grants the minimum permissions to
-   `schemadrill_readonly`.
-2. [`scripts/load_demo_dbs.sql`](scripts/load_demo_dbs.sql) creates the `chinook` schema,
-   inserts the deterministic artist, album, and track rows, and grants read access.
-3. From the repository root, I point `INGEST_DATABASE_URL` at the Neon direct connection
-   and generate the vector rows:
-
-   ```sh
-   INGEST_DATABASE_URL="$DATABASE_URL_UNPOOLED" \
-     .venv/bin/python -m ingest.schema_ingest chinook
-   ```
-
-   If the environment has not been pulled yet, I first run `neon env pull` and load the
-   resulting `.env` without printing its values.
-
-The SQL seed is idempotent: rerunning it keeps existing rows through `ON CONFLICT DO
-NOTHING`. Schema ingestion is also idempotent and refreshes each table's DDL and
-embedding through `ON CONFLICT DO UPDATE`. I verify the setup before deploying by
-confirming that `chinook.artist`, `chinook.album`, `chinook.track`, and
-`public.schema_embeddings` exist and that the three Chinook row counts are non-zero.
-
-### Deploying the container
-
-After installing and authenticating the Google Cloud CLI, I select a project and region:
+Deploy from the repository root:
 
 ```sh
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
 gcloud config set run/region asia-south1
-```
-
-From the repository root, I deploy the existing Dockerfile:
-
-```sh
 gcloud run deploy schemadrill \
   --source . \
   --region asia-south1 \
@@ -322,312 +179,47 @@ gcloud run deploy schemadrill \
   --timeout 300
 ```
 
-`--min 0` lets the service scale down when unused, `--max 2` limits the demo's
-concurrency footprint, and `--memory 2Gi` gives PyTorch and the embedding model enough
-room during a cold start. Cloud Build uses the committed `wheels/` directory and
-`frontend/package-lock.json`, so I check that both are present before deploying.
+Configure `DATABASE_URL`, `GEMINI_API_KEY`, `MODEL_NAME`, `EMBEDDING_MODEL`, retrieval
+settings, and Redis settings on the service. Store credentials in Secret Manager rather
+than in the image or repository. A shared managed Redis instance is required for
+consistent rate limiting across multiple Cloud Run instances; set `REDIS_FAIL_OPEN`
+deliberately if availability should take precedence over enforcement during Redis
+outages.
 
-### Configuring secrets and runtime settings
-
-I configure these values on the Cloud Run service, preferably through Secret Manager for
-the database URLs and Gemini key:
-
-```text
-DATABASE_URL=<remote read-only PostgreSQL URL>
-INGEST_DATABASE_URL=<remote admin URL, normally only needed for ingestion>
-GEMINI_API_KEY=<Gemini API key>
-MODEL_NAME=gemini-3.1-flash-lite
-EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
-TOP_K=3
-MAX_RETRIES=3
-MAX_RESULT_ROWS=1000
-LOG_LEVEL=INFO
-```
-
-I do not put secrets in the Dockerfile, frontend environment variables, Git history, or
-the public README. Frontend variables are browser-visible; database credentials and API
-keys must stay server-side.
-
-### Checking the live service
-
-Cloud Run prints the service URL after deployment. I verify the deployment in this order:
+Verify the deployment:
 
 ```sh
 curl --fail https://YOUR_SERVICE_URL/health
-curl --fail https://YOUR_SERVICE_URL/docs
 curl --fail https://YOUR_SERVICE_URL/
-curl --fail https://YOUR_SERVICE_URL/openapi.json
-```
-
-Then I send one real request:
-
-```sh
 curl --fail https://YOUR_SERVICE_URL/query \
   -H 'Content-Type: application/json' \
   -d '{"db":"chinook","question":"List the names of all artists."}'
-```
-
-The first query may take longer while the embedding model loads. If `/health` works but
-`/query` fails, I check the Cloud Run logs, database network access, pgvector setup,
-Chinook ingestion, and `GEMINI_API_KEY` before changing the frontend.
-
-Cloud Run logs go to the platform log stream because SchemaDrill writes logs to stdout.
-I can inspect them with:
-
-```sh
 gcloud run services logs read schemadrill --region asia-south1 --limit 100
 ```
 
-I set a billing budget alert, keep the minimum instance count at zero, cap the maximum
-instances, and monitor both Cloud Run and the managed database. A free tier is not a
-guarantee of zero cost.
+The embedding model is preloaded during application startup by default, so the first
+query does not pay the model-load cost. Set `PRELOAD_EMBEDDING_MODEL=false` only when
+you prefer faster container startup over predictable first-query latency. Gemini is a
+remote provider and is not locally warmable; the first request can still include
+provider/network latency. Configure a billing alert and keep the minimum instance count
+at zero for a low-traffic demo.
 
-## Prompt Benchmark
+## Quality checks
 
-Run every prompt sequentially through retrieval, Gemini, SQL validation, the offline parsed-SQL judge, and Postgres execution:
-
-```sh
-docker compose exec app python -m eval.run_benchmark \
- --questions eval/questions.json \
- --output /tmp/schemadrill-results.jsonl
-```
-
-The command prints each prompt result immediately and reports result-based Execution Accuracy, execution success, AST match rate, result metadata, and timing. AST match remains a diagnostic and is not used as EX. Run a smaller check with:
+The CI workflow runs Ruff, Black, the Python tests, frontend build checks, Docker
+validation, pgvector smoke tests, and deterministic Chinook evaluation. BIRD remains an
+explicit manual or scheduled evaluation because its data and database setup are not
+checked into the repository.
 
 ```sh
-docker compose exec app python -m eval.run_benchmark --db chinook --limit 1
+python -m pytest -q
+ruff check .
+black --check .
 ```
 
-Each JSONL record includes `gold_sql`, `generated_sql`, canonical `result_match`, compatibility `execution_match`, separate `ast_match`, execution errors/categories, row counts, columns, and gold/generated SQL execution times. The result comparator preserves duplicate rows, handles NULL and numeric representations, ignores row order, and keeps column order significant. Aggregate output reports canonical `result_set_accuracy`, `execution_success_rate`, `ast_match_rate`, and `mean_elapsed_ms`, while retaining `execution_accuracy` as a compatibility alias.
-
-Set `DISABLE_SELF_CORRECTION=true` to force the pipeline and benchmark runner to use exactly one generation/gate/execute attempt, regardless of `MAX_RETRIES`. The default `false` value preserves the configured retry budget. For local comparison artifacts, use `--disable-self-correction` with the benchmark runner and write separate outputs such as `results_retry.jsonl` and `results_noretry.jsonl`.
-The live matrix script sets `ENABLE_FK_EXPANSION` and `DISABLE_SELF_CORRECTION` for each run. To measure resume metrics (this calls Gemini; it is separate from CI):
-
-```sh
-docker compose exec -T app python -m eval.run_benchmark_matrix \
-  --questions eval/questions.json --db chinook \
-  --output-dir /tmp/schemadrill-benchmark
-docker compose cp app:/tmp/schemadrill-benchmark ./benchmark-results
-```
-
-The runner writes four raw files (`no_retry_no_fk.jsonl`, `retry_no_fk.jsonl`, `no_retry_fk.jsonl`, `retry_fk.jsonl`) and `matrix_summary.json`. It warms the embedding model outside the timed run and reports result-match counts, accuracy and paired deltas. Mean elapsed time includes query generation, execution and gold/generated SQL evaluation. Report the dataset and example count with resume metrics.
-
-### Resume metrics status
-
-The checked-in `results_noretry.jsonl` and `results_retry.jsonl` are controlled evaluator outputs: every `generated_sql` exactly equals `gold_sql`. They are not live Gemini measurements and must not be used as resume claims. No complete live four-configuration matrix is checked in. Use `eval.run_benchmark_matrix` to create fresh artifacts for the four configurations.
-
-After the matrix run finishes, use its aggregate report to fill this table (latency in seconds for the resume bullet):
-
-| Configuration | Result-set accuracy | Mean elapsed time |
-| --- | ---: | ---: |
-| No self-correction | Not measured | Not measured |
-| With self-correction | Not measured | Not measured |
-| No FK expansion | Not measured | Not measured |
-| With FK expansion | Not measured | Not measured |
-
-Do not infer an improvement unless the paired run artifacts show it; report the example count and dataset with the figures.
-
-The legacy entry point delegates to the same runner:
-
-```sh
-docker compose exec app python -m eval.run_eval --questions eval/questions.json
-```
-
-## Dataset Evaluation
-
-Use `evaluation/` for dataset-facing commands and cases. The older `eval/` package remains the implementation and backward-compatible CLI location.
-
-Run the five deterministic Chinook cases locally after starting the database and ingesting the schema:
-
-```sh
-docker compose exec app python -m evaluation.runner \
- --questions evaluation/chinook/cases.json \
- --dataset chinook \
- --output /tmp/schemadrill-chinook.jsonl
-```
-
-Run the evaluator/database smoke check without Gemini:
-
-```sh
-docker compose run --rm app python -m evaluation.runner \
- --gold-as-generated --dataset chinook
-```
-
-This controlled check should report 100% EX and AST match for the seeded gold cases. It validates the evaluator and database fixture, not model quality. BIRD Mini-Dev belongs in a manual/nightly run once its local dataset and reference semantics are configured:
-
-```sh
-python -m evaluation.runner \
- --questions evaluation/bird/mini_dev.json \
- --dataset bird-mini-dev
-```
-
-## PostgreSQL
-
-You do not need a remote PostgreSQL instance for local development. Compose starts `pgvector/pg16`, creates the `schemadrill` database, enables the vector extension, creates the HNSW-backed `schema_embeddings` table, and loads the demo `chinook` schema.
-
-A remote instance such as Neon is optional for shared or deployed environments. Set both
-`DATABASE_URL` and `INGEST_DATABASE_URL` to that instance, enable the `vector` extension,
-run `scripts/init.sql`, create/load the target schemas, and run ingestion before calling
-`/query`. The benchmark fixture migration creates `ecommerce`, `organization`, and
-`complex_synthetic`, but schema ingestion is a separate step:
-
-```sh
-python -m ingest.schema_ingest chinook
-python -m ingest.schema_ingest ecommerce
-python -m ingest.schema_ingest organization
-python -m ingest.schema_ingest complex_synthetic
-```
-
-The ingestion command uses autocommit because embedding generation can take longer than a
-remote PostgreSQL idle-in-transaction timeout.
-
-## Local Checks and CI Reproduction
-
-Run the quality job and Docker/Postgres job from `.github/workflows/ci.yml` locally:
+If the repository virtual environment is present, use `.venv/bin/python` or activate it:
 
 ```sh
 source .venv/bin/activate
-pip install -r requirements-dev.txt
-ruff check .
-black --check .
-pytest -q
-docker compose config -q
-docker compose build app
-docker compose up -d db
-docker compose run --rm app python -m eval.benchmark
-docker compose run --rm app python -m evaluation.runner --gold-as-generated --dataset chinook
-docker compose up -d app
-curl --fail http://localhost:8000/health
-docker compose down
+python -m pytest -q
 ```
-
-The evaluator smoke test uses gold SQL and does not call Gemini. `eval.benchmark` checks pgvector infrastructure; it is not the live SQL-quality benchmark. The four-run matrix above calls Gemini and is separate from CI. `docker compose down` stops the services while keeping the database volume.
-
-### Run the four live benchmark configurations
-
-Set `GEMINI_API_KEY` in `.env`, then start the database and app, ingest Chinook's schema so vector retrieval has DDL embeddings, and run the matrix:
-
-```sh
-docker compose up -d db app
-docker compose exec app python -m ingest.schema_ingest chinook
-docker compose exec -T app python -m eval.run_benchmark_matrix \
-  --questions eval/questions.json --db chinook \
-  --output-dir /tmp/schemadrill-benchmark
-docker compose cp app:/tmp/schemadrill-benchmark ./benchmark-results
-```
-
-The script performs an untimed embedding-model warm-up for each configuration, then runs the same questions with retries off/on and FK expansion off/on. It writes `no_retry_no_fk.jsonl`, `retry_no_fk.jsonl`, `no_retry_fk.jsonl`, `retry_fk.jsonl`, and `matrix_summary.json`. The summary gives accuracy deltas in percentage points and mean elapsed-time deltas in milliseconds and seconds. Keep the four raw JSONL files with the summary for reproducibility; their elapsed time includes query generation, execution, and gold/generated SQL evaluation, but excludes embedding-model download and initialization.
-
-### Reproducible benchmark harness
-
-The current harness records one JSONL result per question and a JSON/Markdown summary
-with a unique run ID, UTC timestamp, git commit, dataset hash, model, configuration,
-failure details, result-set accuracy, execution success, latency percentiles, and retries:
-
-```sh
-python -m evaluation.run_benchmark \
-  --questions evaluation/chinook/cases.json \
-  --dataset chinook \
-  --matrix \
-  --output-dir benchmark-results
-```
-
-Use repeated `--config` JSON values instead of `--matrix` for selected configurations.
-The existing `DISABLE_SELF_CORRECTION` and `ENABLE_FK_EXPANSION` settings are applied
-through the same `Settings` object used by the production pipeline. Each configuration
-gets an independent JSONL artifact. The generated-execution timing is recorded by the
-existing evaluator; retrieval, generation, validation, provider token usage, and cost
-remain `null` when the current provider/pipeline does not expose those measurements.
-Errors are truncated and redact connection credentials and API-key-shaped values.
-
-For a credential-free local/CI fixture check, use the seeded database and gold SQL as
-the generated SQL. This validates database isolation, serialization, and comparator
-semantics but is not a model-quality result:
-
-```sh
-python -m evaluation.run_benchmark \
-  --questions evaluation/chinook/cases.json \
-  --gold-as-generated \
-  --output-dir benchmark-results
-```
-
-The resulting `<run-id>_summary.md` is suitable for inclusion in the README. The
-fixture smoke run is deterministic apart from elapsed timings and its generated run ID;
-live model runs can vary with provider responses, model revisions, retrieval state, and
-database load. No token count, cost, or benchmark result is synthesized when metadata is
-unavailable.
-
-See the real local fixture output in
-[`benchmark-results/sample_chinook_summary.json`](benchmark-results/sample_chinook_summary.json).
-The latest local run used the five seeded Chinook cases and recorded 100% result-set
-accuracy and 100% SQL execution success. Its end-to-end benchmark latency averaged
-15.625 ms (p95 50.924 ms), while evaluation overhead averaged 15.544 ms (p95
-50.831 ms). Because this was `--gold-as-generated` fixture mode, model, retrieval,
-and pipeline stage timings are intentionally unavailable; these numbers are a harness
-and database-comparison baseline, not an LLM-quality claim.
-
-Instrumented model-backed runs expose nested `pipeline`, `attempt`, `retrieval`,
-`model_call`, `sql_validation`, `sql_dry_run`, `sql_execution`, and
-`result_serialization` spans. The evaluator separately records gold execution,
-generated execution, result comparison, and evaluation overhead. Each span uses a
-monotonic nanosecond clock, records its attempt and parent span, and retains failure
-or timeout status. Retrieval table counts and context character counts are recorded
-when the retrieval provider returns them; provider token usage, provider latency, and
-cost remain unavailable unless the provider exposes them through the existing call.
-Stage summaries use linear interpolation over sorted observations (`p90` and `p95`
-included) and never sum nested spans into a wall-clock total. Compare reports by
-matching dataset hashes, model identifiers, configuration fields, and the
-`pipeline_latency_ms` and `evaluation_overhead_ms` distributions.
-
-### Benchmark dataset catalog
-
-The registry supports four local PostgreSQL datasets. Chinook remains the compatibility
-baseline; the other three are compact synthetic fixtures and do not establish
-real-world generalization or production performance.
-
-| Dataset | Version | Tables and relationships | Questions | Coverage |
-|---|---|---|---:|---|
-| `chinook` | 1 | Existing `artist`, `album`, and `track` fixture | 5 | Baseline joins, counts, ordering, limits |
-| `ecommerce` | 1 | Customers, products, orders, order items, payments, shipments | 6 | Aggregation, `HAVING`, dates, NULLs, anti-joins, payment/order totals |
-| `organization` | 1 | Employees, departments, projects, assignments | 6 | Self-joins, correlated averages, nullable managers, many-to-many joins |
-| `complex_synthetic` | 1 | Tenant-scoped accounts/users/memberships, regions, projects, events | 6 | Composite keys, multi-hop joins, ambiguous paths, NULL project relationships |
-
-Synthetic fixtures are deterministic, seeded with fixed SQL, and use PostgreSQL syntax.
-Initialize them only against a local database:
-
-```sh
-python -m evaluation.run_benchmark \
-  --dataset ecommerce --initialize --gold-as-generated \
-  --output-dir benchmark-results
-python -m evaluation.run_benchmark \
-  --dataset organization --initialize --gold-as-generated \
-  --output-dir benchmark-results
-python -m evaluation.run_benchmark \
-  --dataset complex_synthetic --initialize --gold-as-generated \
-  --output-dir benchmark-results
-python -m evaluation.run_benchmark \
-  --all-datasets --initialize --matrix --gold-as-generated \
-  --output-dir benchmark-results
-```
-
-`--initialize` uses `INGEST_DATABASE_URL` and refuses non-local hosts. It is explicit
-because fixture initialization mutates the selected database. Every generated artifact
-contains the dataset ID, dataset version, content hash, and configuration. Existing
-`--questions evaluation/chinook/cases.json` invocations remain supported.
-
-For an explicitly approved Neon benchmark database, apply
-[`scripts/load_benchmark_datasets.sql`](scripts/load_benchmark_datasets.sql) using the
-direct/unpooled Neon connection, then run the benchmark without `--initialize`. The
-checked-in migration is additive and idempotent, grants read access to the existing
-`schemadrill_readonly` role, and should not be applied to an unintended production
-branch. The three schemas were verified against Neon with 23/23 gold queries succeeding
-and 100% result-set accuracy on 2026-10-25.
-
-## CI
-
-When I push or open a pull request, GitHub Actions checks the frontend first with `npm ci`,
-`npm audit --audit-level=high`, and `npm run build`. It then runs Ruff, Black, pytest,
-Docker Compose validation, the Postgres/pgvector checks, the vector benchmark, and the
-credential-free Chinook evaluator smoke test. That smoke test uses seeded gold SQL, so it
-checks the evaluator and database fixture without calling Gemini. I keep BIRD Mini-Dev out
-of push/PR CI and run it manually or nightly when its local data is available.
