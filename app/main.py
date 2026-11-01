@@ -9,6 +9,7 @@ from redis import asyncio as redis_asyncio
 
 from app.config import get_settings
 from app.db import close_pool
+from app.embedding import get_embedding_model
 from app.llm_client import provider_metrics
 from app.models import QueryRequest, QueryResult
 from app.pipeline import run_pipeline
@@ -29,6 +30,10 @@ async def lifespan(app: FastAPI):
         client = redis_asyncio.from_url(settings.redis_url, decode_responses=True)
         app.state.redis = client
         app.state.rate_limiter = RedisRateLimiter(client)
+    if settings.preload_embedding_model:
+        logger.info("embedding_model_preload_started model=%s", settings.embedding_model)
+        await asyncio.to_thread(get_embedding_model)
+        logger.info("embedding_model_preload_completed model=%s", settings.embedding_model)
     yield
     if app.state.redis is not None:
         await app.state.redis.aclose()
