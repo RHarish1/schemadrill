@@ -52,6 +52,7 @@ function App() {
       if (payload.status === "failed") {
         setError({ message: payload.reason || "The query could not be executed.", details: payload });
       } else {
+        setApiOnline(true);
         setResult({ ...payload, question: cleanQuestion });
       }
     } catch (requestError) {

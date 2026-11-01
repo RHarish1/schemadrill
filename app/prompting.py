@@ -1,4 +1,3 @@
-import json
 import logging
 
 from app.models import DDLBlock, RetryState
@@ -7,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are an expert PostgreSQL SQL generator.
 Use only the tables and columns present in the supplied schema context.
-Return exactly one SQL query through the required response schema.
+Return exactly one SQL query through the required response schema. Use leniency in matching names and regions and all unless explicitly told by user to not do so, for example if user tells you to search "West", search "west" as well.
 Target dialect: PostgreSQL. Generate a read-only query.
 """
 
@@ -35,7 +34,7 @@ def build_messages(
             "content": f"Schema context:\n{schema_context}\n\nQuestion:\n{question}{retry_context}",
         },
     ]
-    logger.info("gemini_prompt messages=%s", json.dumps(messages, ensure_ascii=True))
+    logger.info("gemini_prompt message_count=%d", len(messages))
     return messages
 
 
