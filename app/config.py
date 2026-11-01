@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     max_result_rows: int = 1000
     redis_url: str = ""
     redis_fail_open: bool = False
+    neon_auth_jwks_url: str = ""
+    neon_auth_issuer: str = ""
+    neon_auth_audience: str = ""
     rate_limit_requests: int = 60
     rate_limit_window_seconds: int = 60
     max_concurrent_queries: int = 8

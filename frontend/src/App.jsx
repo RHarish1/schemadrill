@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiRequestError, checkHealth, listDatasets, queryDatabase } from "./services/api";
+import { authClient } from "./auth";
 import "./styles.css";
 
 function App() {
@@ -10,6 +11,7 @@ function App() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [apiOnline, setApiOnline] = useState(null);
+  const [session, setSession] = useState(null);
   const selectedDataset = datasets.find((item) => item.id === dataset);
 
   useEffect(() => {
@@ -38,7 +40,16 @@ function App() {
       cancelled = true;
       window.clearInterval(healthCheckInterval);
     };
+  }, [session]);
+
+  useEffect(() => {
+    if (!authClient) return;
+    authClient.getSession().then(({ data }) => setSession(data?.session ?? null));
   }, []);
+
+  async function signIn() {
+    await authClient?.signIn.social({ provider: "google", callbackURL: window.location.origin });
+  }
 
   async function submitQuery(event) {
     event?.preventDefault();
@@ -77,6 +88,13 @@ function App() {
           <span>Schema<span className="lime">Drill</span></span>
         </a>
         <div className="nav-right">
+          {session ? (
+            <button type="button" onClick={() => authClient?.signOut().then(() => setSession(null))}>
+              Sign out
+            </button>
+          ) : (
+            <button type="button" onClick={signIn}>Sign in with Google</button>
+          )}
           <span className={`status ${apiOnline === false ? "offline" : ""}`}>
             <i /> {apiOnline === null ? "Checking API" : apiOnline ? "API online" : "API offline"}
           </span>
@@ -104,7 +122,7 @@ function App() {
             <div className="suggestions"><span>Try an example</span>
               {(selectedDataset?.examples || []).map((example) => <button type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}
             </div>
-            <button className="run-button" type="submit" disabled={loading || !question.trim()}>
+            <button className="run-button" type="submit" disabled={loading || !question.trim() || !session}>
               {loading ? <><span className="spinner" /> Running query...</> : <>Run query <b>↗</b></>}
             </button>
             <p className="shortcut">Press <kbd>Ctrl</kbd><span>↵</span> or <kbd>⌘</kbd><span>↵</span> to run</p>

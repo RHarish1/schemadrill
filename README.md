@@ -239,3 +239,11 @@ If the repository virtual environment is present, use `.venv/bin/python` or acti
 source .venv/bin/activate
 python -m pytest -q
 ```
+
+### Authentication
+
+The API protects query, dataset, and metrics routes with Neon Managed Auth JWTs.
+Configure `NEON_AUTH_JWKS_URL`, `NEON_AUTH_ISSUER`, and `NEON_AUTH_AUDIENCE` for
+the backend, and `VITE_NEON_AUTH_URL` for the frontend. Enable Google as a
+provider in Neon Auth and add each deployed frontend origin to its trusted
+domains. `/health` remains public for Cloud Run health checks.

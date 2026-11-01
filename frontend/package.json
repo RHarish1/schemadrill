@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@neondatabase/auth": "^0.7.0-beta",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
