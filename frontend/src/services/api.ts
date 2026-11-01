@@ -1,5 +1,6 @@
 import type { QueryRequest, QueryResult } from "../types/api";
 import type { DatasetCatalogResponse } from "../types/api";
+import { getAuthToken } from "../auth";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -15,10 +16,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
+    const token = await getAuthToken();
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", ...init?.headers },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init?.headers,
+      },
     });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {

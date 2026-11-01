@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from redis import asyncio as redis_asyncio
 
+from app.auth import current_user_id
 from app.config import get_settings
 from app.db import close_pool
 from app.embedding import get_embedding_model
@@ -49,12 +50,14 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/datasets")
-def datasets() -> dict[str, list[dict[str, object]]]:
+def datasets(request: Request) -> dict[str, list[dict[str, object]]]:
+    current_user_id(request)
     return {"datasets": dataset_catalog()}
 
 
 @app.get("/metrics")
-def metrics() -> dict[str, int]:
+def metrics(request: Request) -> dict[str, int]:
+    current_user_id(request)
     values = provider_metrics.snapshot()
     values.update(app.state.metrics.snapshot())
     return values
@@ -63,7 +66,8 @@ def metrics() -> dict[str, int]:
 @app.post("/query", response_model=QueryResult)
 async def query(request: Request, payload: QueryRequest) -> QueryResult:
     settings = get_settings()
-    client_key = request.client.host if request.client else "unknown"
+    user_id = current_user_id(request)
+    client_key = f"user:{user_id}"
     application = request.app
     try:
         allowed, retry_after = await application.state.rate_limiter.allow(
