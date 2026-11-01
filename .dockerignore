@@ -2,6 +2,7 @@
 .github
 .env
 !frontend/.env
+!frontend/.env.production
 .venv
 __pycache__
 .pytest_cache
