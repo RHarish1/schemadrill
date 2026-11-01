@@ -4,6 +4,8 @@ WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 COPY frontend/ .
+ARG VITE_NEON_AUTH_URL
+ENV VITE_NEON_AUTH_URL=${VITE_NEON_AUTH_URL}
 RUN npm run build
 
 FROM python:3.12-slim

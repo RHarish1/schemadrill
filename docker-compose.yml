@@ -27,6 +27,8 @@ services:
 
   app:
     build: .
+    args:
+      VITE_NEON_AUTH_URL: ${VITE_NEON_AUTH_URL:-}
     env_file:
       - path: .env
         required: false
