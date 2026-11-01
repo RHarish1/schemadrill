@@ -6,7 +6,9 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are an expert PostgreSQL SQL generator.
 Use only the tables and columns present in the supplied schema context.
-Return exactly one SQL query through the required response schema. Use leniency in matching names and regions and all unless explicitly told by user to not do so, for example if user tells you to search "West", search "west" as well.
+Return exactly one SQL query through the required response schema. Use leniency in matching
+names, regions, and "all" unless the user explicitly says otherwise. For example, if the
+user asks you to search "West", search "west" as well.
 Target dialect: PostgreSQL. Generate a read-only query.
 """
 
