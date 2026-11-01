@@ -1,12 +1,14 @@
-import json
 import logging
 
 import instructor
+from google.genai import types
 
 from app.config import get_settings
 from app.models import SqlResponse
+from app.reliability import ReliabilityMetrics, RetryPolicy, call_with_provider_retry_sync
 
 logger = logging.getLogger(__name__)
+provider_metrics = ReliabilityMetrics()
 
 
 def count_prompt_tokens(messages: list[dict[str, str]]) -> int:
@@ -23,18 +25,35 @@ def generate(messages: list[dict[str, str]]) -> SqlResponse:
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
     logger.info(
-        "gemini_request model=%s messages=%s",
+        "gemini_request model=%s message_count=%d",
         settings.model_name,
-        json.dumps(messages, ensure_ascii=True),
+        len(messages),
     )
-    client = instructor.from_provider(
-        f"google/{settings.model_name}",
-        api_key=settings.gemini_api_key,
-        mode=instructor.Mode.GENAI_TOOLS,
+
+    def request() -> SqlResponse:
+        client = instructor.from_provider(
+            f"google/{settings.model_name}",
+            api_key=settings.gemini_api_key,
+            mode=instructor.Mode.GENAI_TOOLS,
+            http_options=types.HttpOptions(
+                timeout=int(settings.provider_timeout_seconds * 1000),
+                retry_options=types.HttpRetryOptions(attempts=1),
+            ),
+        )
+        return client.create(
+            messages=messages,
+            response_model=SqlResponse,
+        )
+
+    response = call_with_provider_retry_sync(
+        request,
+        RetryPolicy(
+            max_attempts=settings.provider_max_attempts,
+            base_delay_seconds=settings.provider_backoff_base_seconds,
+            max_delay_seconds=settings.provider_backoff_max_seconds,
+            jitter_seconds=settings.provider_backoff_jitter_seconds,
+        ),
+        metrics=provider_metrics,
     )
-    response = client.create(
-        messages=messages,
-        response_model=SqlResponse,
-    )
-    logger.info("gemini_response sql=%r", response.sql)
+    logger.info("gemini_response model=%s", settings.model_name)
     return response
