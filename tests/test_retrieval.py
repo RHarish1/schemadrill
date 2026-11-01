@@ -1,8 +1,14 @@
 from contextlib import contextmanager
 
+import pytest
+
 from app.config import Settings
 from app.models import DDLBlock
-from app.retrieval import PgVectorRetrievalProvider, _retrieve_with_fk_expansion
+from app.retrieval import (
+    PgVectorRetrievalProvider,
+    _retrieve_full_schema,
+    _retrieve_with_fk_expansion,
+)
 
 
 class FakeCursor:
@@ -78,6 +84,34 @@ def test_expansion_disabled_returns_original_vector_results(monkeypatch):
     )
 
     assert result is original
+
+
+def test_full_schema_retrieval_does_not_embed(monkeypatch):
+    class FullSchemaCursor(FakeCursor):
+        def execute(self, query, params):
+            self.rows = [{"table_name": "album"}, {"table_name": "artist"}]
+
+    class FullSchemaConnection(FakeConnection):
+        def cursor(self, row_factory=None):
+            return FullSchemaCursor([], [])
+
+        def execute(self, query, params):
+            if "information_schema.columns" in query:
+                rows = [("id", "integer", "NO")]
+            else:
+                rows = []
+            return type("Result", (), {"fetchall": lambda self: rows})()
+
+    @contextmanager
+    def connection():
+        yield FullSchemaConnection([], [])
+
+    monkeypatch.setattr("app.retrieval.readonly_connection", connection)
+    monkeypatch.setattr("app.retrieval.embed_query", lambda _: pytest.fail("embedding called"))
+
+    result = _retrieve_full_schema("chinook")
+
+    assert [block.table_name for block in result] == ["album", "artist"]
 
 
 def test_enabled_expansion_adds_outgoing_fk_neighbor(monkeypatch):
