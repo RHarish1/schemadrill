@@ -4,6 +4,7 @@ import { authClient } from "./auth";
 import "./styles.css";
 
 function App() {
+  const authConfigMessage = "Google sign-in is not configured. Set VITE_NEON_AUTH_URL and rebuild.";
   const [datasets, setDatasets] = useState([]);
   const [dataset, setDataset] = useState("");
   const [question, setQuestion] = useState("");
@@ -48,7 +49,11 @@ function App() {
   }, []);
 
   async function signIn() {
-    await authClient?.signIn.social({ provider: "google", callbackURL: window.location.origin });
+    if (!authClient) {
+      setError({ message: authConfigMessage });
+      return;
+    }
+    await authClient.signIn.social({ provider: "google", callbackURL: window.location.origin });
   }
 
   async function submitQuery(event) {
@@ -93,8 +98,9 @@ function App() {
               Sign out
             </button>
           ) : (
-            <button type="button" onClick={signIn}>Sign in with Google</button>
+            <button type="button" onClick={signIn} disabled={!authClient}>Sign in with Google</button>
           )}
+          {!authClient && <span className="status offline">Auth not configured</span>}
           <span className={`status ${apiOnline === false ? "offline" : ""}`}>
             <i /> {apiOnline === null ? "Checking API" : apiOnline ? "API online" : "API offline"}
           </span>
