@@ -15,6 +15,7 @@ from app.llm_client import provider_metrics
 from app.models import QueryRequest, QueryResult
 from app.pipeline import run_pipeline
 from app.reliability import AllowAllRateLimiter, RedisRateLimiter, ReliabilityMetrics
+from app.tenant import provision_user, user_has_dataset
 from evaluation.datasets import dataset_catalog
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,8 @@ def health() -> dict[str, str]:
 
 @app.get("/api/datasets")
 def datasets(request: Request) -> dict[str, list[dict[str, object]]]:
-    current_user_id(request)
+    user_id = current_user_id(request)
+    provision_user(user_id)
     return {"datasets": dataset_catalog()}
 
 
@@ -67,6 +69,9 @@ def metrics(request: Request) -> dict[str, int]:
 async def query(request: Request, payload: QueryRequest) -> QueryResult:
     settings = get_settings()
     user_id = current_user_id(request)
+    provision_user(user_id, settings)
+    if not user_has_dataset(user_id, payload.db, settings):
+        raise HTTPException(status_code=404, detail="Dataset not found")
     client_key = f"user:{user_id}"
     application = request.app
     try:

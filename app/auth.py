@@ -1,10 +1,13 @@
 import json
+import logging
 from functools import lru_cache
 
 import jwt
 from fastapi import HTTPException, Request
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -39,6 +42,7 @@ def current_user_id(request: Request) -> str:
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail="Authentication is not configured") from error
     except (jwt.PyJWTError, json.JSONDecodeError, OSError) as error:
+        logger.warning("authentication_token_rejected error_type=%s", type(error).__name__)
         raise HTTPException(status_code=401, detail="Invalid authentication token") from error
     user_id = claims.get("sub")
     if not isinstance(user_id, str) or not user_id:

@@ -76,6 +76,13 @@ npm install
 npm run dev
 ```
 
+The public health indicator does not require sign-in. The first authenticated request
+creates the user record and provisions the default datasets idempotently. Add
+`http://localhost:8000` (or `http://localhost:5173` for Vite) to the Neon Auth trusted
+origins if Google sign-in is being tested locally. `NEON_AUTH_ISSUER` must be the Neon
+Auth host URL; `NEON_AUTH_JWKS_URL` includes the `/neondb/auth/.well-known/jwks.json`
+path.
+
 ## Evaluation and ablations
 
 The evaluator compares generated and gold SQL by executing both against the same

@@ -12,11 +12,11 @@ class ApiRequestError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, includeAuth = true): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const token = await getAuthToken();
+    const token = includeAuth ? await getAuthToken() : null;
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       signal: controller.signal,
@@ -54,7 +54,14 @@ export function queryDatabase(requestBody: QueryRequest) {
 }
 
 export function checkHealth() {
-  return request<{ status: string }>("/health");
+  return fetch(`${API_BASE_URL}/health`, {
+    headers: { Accept: "application/json" },
+  }).then(async (response) => {
+    if (!response.ok) {
+      throw new ApiRequestError(`Request failed with status ${response.status}.`);
+    }
+    return (await response.json()) as { status: string };
+  });
 }
 
 export function listDatasets() {

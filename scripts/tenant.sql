@@ -13,6 +13,11 @@ CREATE TABLE IF NOT EXISTS public.user_datasets (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.user_datasets
+  DROP CONSTRAINT IF EXISTS user_datasets_pkey;
+ALTER TABLE public.user_datasets
+  ADD CONSTRAINT user_datasets_pkey PRIMARY KEY (dataset_id, user_id);
+
 CREATE INDEX IF NOT EXISTS user_datasets_user_id_idx
   ON public.user_datasets(user_id);
 

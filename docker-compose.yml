@@ -26,9 +26,10 @@ services:
       - ./scripts/load_demo_dbs.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
 
   app:
-    build: .
-    args:
-      VITE_NEON_AUTH_URL: ${VITE_NEON_AUTH_URL:-}
+    build:
+      context: .
+      args:
+        VITE_NEON_AUTH_URL: ${VITE_NEON_AUTH_URL:-https://ep-shy-violet-b305q0j3.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth}
     env_file:
       - path: .env
         required: false

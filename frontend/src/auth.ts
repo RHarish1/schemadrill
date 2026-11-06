@@ -6,6 +6,6 @@ export const authClient = authUrl ? createAuthClient(authUrl) : null;
 
 export async function getAuthToken(): Promise<string | null> {
   if (!authClient) return null;
-  const { data } = await authClient.token();
-  return data?.token ?? null;
+  const { data } = await authClient.getSession();
+  return data?.session?.token ?? null;
 }

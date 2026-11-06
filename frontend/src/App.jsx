@@ -16,15 +16,6 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    listDatasets()
-      .then(({ datasets: availableDatasets }) => {
-        if (cancelled) return;
-        setDatasets(availableDatasets);
-        setDataset((currentDataset) => currentDataset || availableDatasets[0]?.id || "");
-      })
-      .catch(() => {
-        if (!cancelled) setDatasets([]);
-      });
     const checkApiHealth = () => {
       checkHealth()
         .then(() => {
@@ -39,6 +30,27 @@ function App() {
     return () => {
       cancelled = true;
       window.clearInterval(healthCheckInterval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setDatasets([]);
+      setDataset("");
+      return;
+    }
+    let cancelled = false;
+    listDatasets()
+      .then(({ datasets: availableDatasets }) => {
+        if (cancelled) return;
+        setDatasets(availableDatasets);
+        setDataset((currentDataset) => currentDataset || availableDatasets[0]?.id || "");
+      })
+      .catch(() => {
+        if (!cancelled) setDatasets([]);
+      });
+    return () => {
+      cancelled = true;
     };
   }, [session]);
 
