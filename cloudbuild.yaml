@@ -12,33 +12,40 @@ steps:
       - "-q"
 
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    entrypoint: "python3"
-    args:
-      - "-c"
-      - |
-        import json, subprocess
-        raw = subprocess.check_output([
-            "gcloud", "run", "services", "describe", "schemadrill",
-            "--region", "asia-south1", "--format", "json"
-        ], text=True)
-        service = json.loads(raw)
-        envs = service["spec"]["template"]["spec"]["containers"][0].get("env", [])
-        wanted = {"DATABASE_URL", "GEMINI_API_KEY", "MODEL_NAME", "EMBEDDING_MODEL"}
-        with open("/workspace/.cloudbuild.env", "w", encoding="utf-8") as fh:
-            for item in envs:
-                if item.get("name") in wanted and "value" in item:
-                    fh.write(f"{item['name']}={item['value']}\n")
-
-  - name: "gcr.io/cloud-builders/docker"
     entrypoint: "sh"
     args:
       - "-c"
+      - "gcloud run services describe schemadrill --region asia-south1 --format=json > /workspace/.service.json"
+
+  - name: "asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/schemadrill:$COMMIT_SHA"
+    entrypoint: "python"
+    args:
+      - "-c"
       - |
-        trap 'rm -f /workspace/.cloudbuild.env' EXIT
-        docker run --rm --env-file /workspace/.cloudbuild.env \
-          "asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/schemadrill:$COMMIT_SHA" \
-          sh -c 'python -m evaluation.runner --dataset chinook --output /tmp/chinook-eval.jsonl &&
-                 python -c "import json; lines = [json.loads(line) for line in open(\"/tmp/chinook-eval.jsonl\") if line.strip()]; summary = lines[-1][\"summary\"]; assert summary[\"result_set_accuracy\"] == 1.0 and summary[\"execution_success_rate\"] == 1.0 and summary[\"execution_accuracy\"] == 1.0, summary"'
+        import json, os, subprocess
+        try:
+            with open("/workspace/.service.json", encoding="utf-8") as fh:
+                service = json.load(fh)
+            envs = service["spec"]["template"]["spec"]["containers"][0].get("env", [])
+            wanted = {"DATABASE_URL", "GEMINI_API_KEY", "MODEL_NAME", "EMBEDDING_MODEL"}
+            for item in envs:
+                if item.get("name") in wanted and "value" in item:
+                    os.environ[item["name"]] = item["value"]
+        finally:
+            if os.path.exists("/workspace/.service.json"):
+                os.remove("/workspace/.service.json")
+        subprocess.run(
+            ["python", "-m", "evaluation.runner", "--dataset", "chinook", "--output", "/tmp/chinook-eval.jsonl"],
+            check=True,
+        )
+        with open("/tmp/chinook-eval.jsonl", encoding="utf-8") as fh:
+            lines = [json.loads(line) for line in fh if line.strip()]
+        summary = lines[-1]["summary"]
+        assert (
+            summary["result_set_accuracy"] == 1.0
+            and summary["execution_success_rate"] == 1.0
+            and summary["execution_accuracy"] == 1.0
+        ), summary
 
   - name: "gcr.io/cloud-builders/docker"
     args:
