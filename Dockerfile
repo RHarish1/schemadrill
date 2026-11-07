@@ -25,11 +25,13 @@ RUN if ls /app/wheels/*.whl >/dev/null 2>&1; then \
       pip install --no-cache-dir -r requirements.txt; \
     fi
 
+COPY pyproject.toml .
 COPY app ./app
 COPY ingest ./ingest
 COPY eval ./eval
 COPY evaluation ./evaluation
 COPY scripts ./scripts
+COPY tests ./tests
 COPY --from=frontend-build /frontend/dist ./frontend/dist
 
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

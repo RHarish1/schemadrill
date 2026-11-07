@@ -29,8 +29,10 @@ def compare_result_sets(
     column order remains meaningful, row order does not, and row multiplicity
     is retained rather than collapsed into sets.
     """
-    if gold_columns != generated_columns:
+    if len(gold_columns) != len(generated_columns):
         return False
+    if not gold_rows and not generated_rows:
+        return gold_columns == generated_columns
     gold = Counter(tuple(_value_key(value) for value in row) for row in gold_rows)
     generated = Counter(tuple(_value_key(value) for value in row) for row in generated_rows)
     return gold == generated

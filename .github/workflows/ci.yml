@@ -66,12 +66,25 @@ jobs:
           docker compose logs db
           exit 1
       - run: docker compose run --rm app python -m eval.benchmark
+      - name: Ingest Chinook schema embeddings
+        run: docker compose run --rm app python -m ingest.schema_ingest chinook
       - name: Run Chinook evaluator smoke test
         run: |
           docker compose run --rm app sh -c \
             'output=$(python -m evaluation.runner --gold-as-generated --dataset chinook) &&
              echo "$output" &&
              python -c "import json, sys; data = json.loads(sys.argv[1]); assert data[\"result_set_accuracy\"] == 1.0 and data[\"execution_success_rate\"] == 1.0 and data[\"execution_accuracy\"] == 1.0, data" "$output"'
+      - name: Run live Gemini Chinook evaluation (when GEMINI_API_KEY secret is configured)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -n "$GEMINI_API_KEY" ]; then
+            docker compose run --rm -e GEMINI_API_KEY app sh -c \
+              'python -m evaluation.runner --dataset chinook --output /tmp/chinook-live.jsonl &&
+               python -c "import json; lines = [json.loads(line) for line in open(\"/tmp/chinook-live.jsonl\") if line.strip()]; summary = lines[-1][\"summary\"]; assert summary[\"result_set_accuracy\"] == 1.0 and summary[\"execution_success_rate\"] == 1.0 and summary[\"execution_accuracy\"] == 1.0, summary"'
+          else
+            echo "GEMINI_API_KEY secret not set; skipping live Gemini call in GitHub Actions (enforced in Cloud Build)"
+          fi
       - name: Run instrumented benchmark smoke test
         run: |
           docker compose run --rm app sh -c \
