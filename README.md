@@ -48,7 +48,11 @@ The full system diagram, request sequence, data model, CI/CD flow, and decision 
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Diagrams, architectural decisions (ADR log), known gaps, target architecture |
 | [docs/changelog.md](docs/changelog.md) | Shipped features timeline and bugs solved, from git history |
-| [docs/roadmap.md](docs/roadmap.md) | Planned work: Google auth, Neon authorization, BYOK, run SQL on the web, dataset selector, extensions |
+| [docs/roadmap.md](docs/roadmap.md) | Planned work: connect your Neon database, multi-provider BYOK, run SQL on your own DB, CSV/PDF export, uploads |
+| [docs/solution-design.md](docs/solution-design.md) | Initial technical approach for each planned problem: encryption, isolation, SSRF, dead credentials, multi-LLM, uploads |
+| [docs/wiki/connect-neon.md](docs/wiki/connect-neon.md) | How to copy your Neon connection string, create a read-only role, and how long it is kept |
+| [docs/wiki/byok-keys.md](docs/wiki/byok-keys.md) | How to add Gemini, Claude, and GPT keys, and what happens when one expires or runs out |
+| [docs/why-no-neon-oauth.md](docs/why-no-neon-oauth.md) | Why this free project does not use Neon OAuth |
 | [docs/modules.md](docs/modules.md) | Module map |
 | [docs/implementation-notes.md](docs/implementation-notes.md) | Technical history of retry, pipeline, and evaluation work |
 
@@ -56,7 +60,8 @@ The full system diagram, request sequence, data model, CI/CD flow, and decision 
 
 Next iteration: **Sign in with Google, connect your Neon database, bring your own LLM key (BYOK),
 pick a dataset, and ask in natural language.** Google sign-in (via Neon Auth) and curated-dataset
-querying are already live. Neon OAuth connection, BYOK, and user-owned databases are planned.
+querying are already live. Connecting your own Neon database (by connection string),
+multi-provider BYOK, and user-owned databases are planned.
 See [docs/roadmap.md](docs/roadmap.md).
 
 ## Local development

@@ -155,7 +155,7 @@ Two DB roles: `schemadrill_readonly` (serving) and `schemadrill_admin` (ingestio
 ```mermaid
 flowchart LR
     U([User]) -->|1. Sign in with Google| NA[Neon Auth]
-    U -->|2. Connect Neon via OAuth| NO[Neon OAuth / API]
+    U -->|2. Paste Neon connection string| CAT
     U -->|3. Paste LLM API key| KS
 
     subgraph SD["SchemaDrill (Cloud Run)"]
@@ -172,7 +172,7 @@ flowchart LR
     UDB[("User's Neon database<br/>read-only role")]
     VEC[("Per-tenant schema_embeddings")]
 
-    NO -->|tokens| KS
+    CAT -->|"encrypted connection string"| KS
     API --> CAT --> CTL
     KS --> CTL
     API --> PIPE
