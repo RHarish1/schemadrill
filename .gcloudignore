@@ -17,4 +17,5 @@ frontend/.env.local
 node_modules/
 
 !wheels/
-!wheels/**
+wheels/*.whl
+!wheels/.gitkeep

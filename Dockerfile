@@ -15,7 +15,12 @@ WORKDIR /app
 COPY requirements.txt .
 COPY wheels ./wheels
 
-RUN pip install --no-cache-dir --no-index --find-links=/app/wheels -r requirements.txt
+RUN if ls /app/wheels/*.whl >/dev/null 2>&1; then \
+      pip install --no-cache-dir --no-index --find-links=/app/wheels -r requirements.txt; \
+    else \
+      pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch && \
+      pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 COPY app ./app
 COPY ingest ./ingest
