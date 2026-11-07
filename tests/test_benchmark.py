@@ -76,3 +76,25 @@ def test_evaluator_smoke_uses_gold_sql_without_generation(monkeypatch, tmp_path)
 
     assert summary["execution_accuracy"] == 1.0
     assert summary["ast_match_rate"] == 1.0
+
+
+def test_evaluator_smoke_raises_when_execution_fails(monkeypatch, tmp_path):
+    import pytest
+
+    cases = tmp_path / "cases.json"
+    cases.write_text('[{"question_id": "q1", "gold_sql": "SELECT 1"}]', encoding="utf-8")
+    monkeypatch.setattr(
+        "evaluation.runner.evaluate_sql_pair",
+        lambda question_id, gold_sql, generated_sql, connection_factory: SQLEvalResult(
+            question_id=question_id,
+            gold_sql=gold_sql,
+            generated_sql=generated_sql,
+            gold_executed=False,
+            generated_executed=False,
+            execution_match=False,
+            ast_match=True,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Evaluator smoke checks failed"):
+        run_evaluator_smoke(str(cases), "test")

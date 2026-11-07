@@ -38,3 +38,20 @@ def test_synthetic_questions_cover_expected_relationship_traps():
     assert "tenant_id" in sql
     assert "IS NULL" in sql
     assert "DISTINCT" in sql
+
+
+def test_provisioning_database_url_uses_ingest_for_readonly_role():
+    from app.config import Settings
+    from app.tenant import _provisioning_database_url
+
+    local_settings = Settings(
+        database_url="postgresql://schemadrill_readonly:schemadrill@db:5432/schemadrill",
+        ingest_database_url="postgresql://schemadrill_admin:schemadrill@db:5432/schemadrill",
+    )
+    assert _provisioning_database_url(local_settings) == local_settings.ingest_database_url
+
+    managed_settings = Settings(
+        database_url="postgresql://neondb_owner:secret@ep-demo.neon.tech/neondb",
+        ingest_database_url="postgresql://schemadrill_admin:schemadrill@localhost:5432/schemadrill",
+    )
+    assert _provisioning_database_url(managed_settings) == managed_settings.database_url

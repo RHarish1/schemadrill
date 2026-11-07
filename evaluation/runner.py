@@ -33,6 +33,8 @@ def run_evaluator_smoke(questions_path: str, dataset: str) -> dict[str, Any]:
     }
     summary["execution_accuracy"] = summary["result_set_accuracy"]
     print(json.dumps(summary, sort_keys=True))
+    if summary["result_set_accuracy"] < 1.0 or summary["execution_success_rate"] < 1.0:
+        raise RuntimeError(f"Evaluator smoke checks failed: {summary}")
     return summary
 
 

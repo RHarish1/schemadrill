@@ -34,7 +34,21 @@ class BenchmarkDataset:
 
     def initialize(self, connection: Connection) -> None:
         with connection.cursor() as cursor:
-            cursor.execute(self.schema_sql)
+            if self.schema_sql.strip():
+                cursor.execute(self.schema_sql)
+            cursor.execute(
+                f"""
+                DO $$
+                BEGIN
+                  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'schemadrill_readonly')
+                     AND EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = {self.dataset_id!r}) THEN
+                    EXECUTE format('GRANT USAGE ON SCHEMA %I TO schemadrill_readonly', {self.dataset_id!r});
+                    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO schemadrill_readonly', {self.dataset_id!r});
+                  END IF;
+                END
+                $$;
+                """
+            )
         connection.commit()
 
     def seed(self, connection: Connection, seed: int = 0) -> None:

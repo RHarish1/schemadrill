@@ -413,6 +413,16 @@ def run_benchmark(
                     "output": str(filename),
                 }
             )
+            if gold_as_generated:
+                run_summary = repetitions_summary[-1]["summary"]
+                if (
+                    run_summary["result_set_accuracy"] < 1.0
+                    or run_summary["sql_execution_success_rate"] < 1.0
+                ):
+                    raise RuntimeError(
+                        f"Benchmark smoke check failed for {dataset_name}/{config['name']}: "
+                        f"{run_summary}"
+                    )
         summaries[config["name"]] = (
             repetitions_summary[0]["summary"]
             if repetitions == 1

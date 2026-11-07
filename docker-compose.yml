@@ -23,6 +23,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ./scripts/tenant.sql:/docker-entrypoint-initdb.d/05-tenant.sql:ro
       - ./scripts/load_demo_dbs.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
 
   app:

@@ -3,7 +3,9 @@ CREATE EXTENSION IF NOT EXISTS vector;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'schemadrill_readonly') THEN
-    CREATE ROLE schemadrill_readonly LOGIN;
+    CREATE ROLE schemadrill_readonly LOGIN PASSWORD 'schemadrill';
+  ELSE
+    ALTER ROLE schemadrill_readonly WITH LOGIN PASSWORD 'schemadrill';
   END IF;
 END
 $$;

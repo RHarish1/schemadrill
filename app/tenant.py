@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 import psycopg
 
@@ -19,6 +20,17 @@ _DEFAULT_DATASETS = (
 )
 
 
+def _provisioning_database_url(settings: Settings) -> str:
+    parsed_db = urlparse(settings.database_url)
+    parsed_ingest = urlparse(settings.ingest_database_url)
+    if (
+        parsed_db.username == "schemadrill_readonly"
+        and parsed_ingest.hostname == parsed_db.hostname
+    ):
+        return settings.ingest_database_url
+    return settings.database_url
+
+
 @lru_cache
 def _ensure_tenant_schema(database_url: str) -> None:
     with psycopg.connect(database_url) as connection:
@@ -28,8 +40,9 @@ def _ensure_tenant_schema(database_url: str) -> None:
 
 def provision_user(user_id: str, settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
-    _ensure_tenant_schema(settings.database_url)
-    with psycopg.connect(settings.database_url) as connection:
+    database_url = _provisioning_database_url(settings)
+    _ensure_tenant_schema(database_url)
+    with psycopg.connect(database_url) as connection:
         cursor = connection.execute(
             """
             INSERT INTO public.users (user_id)
