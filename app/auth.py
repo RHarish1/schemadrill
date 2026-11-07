@@ -1,6 +1,7 @@
 import json
 import logging
 from functools import lru_cache
+from urllib.parse import urlparse
 
 import jwt
 from fastapi import HTTPException, Request
@@ -8,6 +9,15 @@ from fastapi import HTTPException, Request
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _allowed_issuers(issuer: str) -> list[str] | None:
+    cleaned = issuer.strip().rstrip("/")
+    if not cleaned:
+        return None
+    parsed = urlparse(cleaned)
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else cleaned
+    return list(dict.fromkeys([cleaned, origin]))
 
 
 @lru_cache
@@ -28,15 +38,16 @@ def current_user_id(request: Request) -> str:
     try:
         signing_key = _jwks_client().get_signing_key_from_jwt(token)
         settings = get_settings()
+        allowed_issuers = _allowed_issuers(settings.neon_auth_issuer)
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=["EdDSA", "RS256"],
             audience=settings.neon_auth_audience or None,
-            issuer=settings.neon_auth_issuer or None,
+            issuer=allowed_issuers,
             options={
                 "verify_aud": bool(settings.neon_auth_audience),
-                "verify_iss": bool(settings.neon_auth_issuer),
+                "verify_iss": bool(allowed_issuers),
             },
         )
     except RuntimeError as error:
