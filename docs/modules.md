@@ -35,6 +35,9 @@ evaluation.runner
 | `app/embedding.py` | Config-selected sentence-transformer loading and embedding | `embed_passage()`, `embed_query()` | Loads and caches the configured embedding model; CPU model loading can be expensive |
 | `app/db.py` | Shared PostgreSQL connection-pool boundary | `readonly_connection()`, `close_pool()` | Opens pooled connections and sets transactions read-only |
 | `app/sql_guard.py` | Deterministic SQL security boundary | `guard_sql()`, `SQLGuardResult`, `default_guard_config()` | Parses PostgreSQL ASTs; enforces single SELECT, RBAC table scope, blocked functions, and AST-based LIMIT policy |
+| `app/auth.py` | Neon Auth JWT verification | `current_user_id(request)` | Fetches and caches JWKS; accepts EdDSA/RS256; checks issuer (configured value and normalized origin) and optional audience; returns `sub` or raises 401/503 |
+| `app/tenant.py` | Per-user provisioning and dataset ACL | `provision_user()`, `user_has_dataset()` | Ensures `users`/`user_datasets` tables; on first sight of a user seeds default datasets. Uses `INGEST_DATABASE_URL` when serving as the read-only role |
+| `app/reliability.py` | Rate limiting and provider metrics | `RedisRateLimiter`, `AllowAllRateLimiter`, `ReliabilityMetrics` | Redis calls; counters for rejections and timeouts |
 | `app/executor.py` | PostgreSQL dry-run and bounded result execution | `dry_run()`, `execute()` | Runs `EXPLAIN`, fetches at most `max_result_rows + 1`, raises `RowCapExceeded`, returns a DataFrame |
 
 ## Pipeline Stages

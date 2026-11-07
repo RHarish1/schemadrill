@@ -13,6 +13,8 @@ The repository also contains a reproducible evaluation harness and a small React
 - SQL allowlisting, table-scope checks, blocked-function checks, and result-row limits
 - Read-only PostgreSQL execution and structured telemetry
 - Redis request rate limiting, concurrency admission, and provider retry controls
+- Neon Auth (Google) JWT verification and per-user dataset provisioning
+- Cloud Build CI/CD that gates deploys on pytest and a live 100% Chinook evaluation
 - React/Vite frontend served by the same container
 - Chinook regression fixtures and BIRD Mini-Dev evaluation support
 - Evaluation metrics for result-set accuracy, execution success, AST similarity,
@@ -37,8 +39,25 @@ flowchart LR
     Evaluation --> Metrics[Result accuracy and latency metrics]
 ```
 
-See [docs/modules.md](docs/modules.md) for the module map and
-[docs/implementation-notes.md](docs/implementation-notes.md) for technical history.
+The full system diagram, request sequence, data model, CI/CD flow, and decision log are in
+[docs/architecture.md](docs/architecture.md).
+
+## Documentation
+
+| Doc | Contents |
+| --- | --- |
+| [docs/architecture.md](docs/architecture.md) | Diagrams, architectural decisions (ADR log), known gaps, target architecture |
+| [docs/changelog.md](docs/changelog.md) | Shipped features timeline and bugs solved, from git history |
+| [docs/roadmap.md](docs/roadmap.md) | Planned work: Google auth, Neon authorization, BYOK, run SQL on the web, dataset selector, extensions |
+| [docs/modules.md](docs/modules.md) | Module map |
+| [docs/implementation-notes.md](docs/implementation-notes.md) | Technical history of retry, pipeline, and evaluation work |
+
+## Roadmap summary
+
+Next iteration: **Sign in with Google, connect your Neon database, bring your own LLM key (BYOK),
+pick a dataset, and ask in natural language.** Google sign-in (via Neon Auth) and curated-dataset
+querying are already live. Neon OAuth connection, BYOK, and user-owned databases are planned.
+See [docs/roadmap.md](docs/roadmap.md).
 
 ## Local development
 

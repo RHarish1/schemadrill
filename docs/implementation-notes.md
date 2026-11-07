@@ -12,8 +12,8 @@ The work was completed in three slices:
 
 The first two slices were committed separately:
 
-- `d4a8c1f` - `Refactor retry state and retrieval boundary`
-- `b7e14ec` - `Refactor pipeline into validated stages`
+- `54c1105` - `refactor: extract retry state and retrieval boundary`
+- `7b5a7f7` - `refactor: split pipeline into validated stages`
 
 The SQL evaluator changes are currently in the worktree with the tests described below.
 
