@@ -67,7 +67,11 @@ jobs:
           exit 1
       - run: docker compose run --rm app python -m eval.benchmark
       - name: Run Chinook evaluator smoke test
-        run: docker compose run --rm app python -m evaluation.runner --gold-as-generated --dataset chinook
+        run: |
+          docker compose run --rm app sh -c \
+            'output=$(python -m evaluation.runner --gold-as-generated --dataset chinook) &&
+             echo "$output" &&
+             python -c "import json, sys; data = json.loads(sys.argv[1]); assert data[\"result_set_accuracy\"] == 1.0 and data[\"execution_success_rate\"] == 1.0 and data[\"execution_accuracy\"] == 1.0, data" "$output"'
       - name: Run instrumented benchmark smoke test
         run: |
           docker compose run --rm app sh -c \
@@ -76,7 +80,7 @@ jobs:
               --dataset chinook \
               --gold-as-generated \
               --output-dir /tmp/schemadrill-benchmark &&
-             test -n "$(find /tmp/schemadrill-benchmark -name "*_summary.json" -size +0c -print -quit)"'
+             python -c "import glob, json; files = glob.glob(\"/tmp/schemadrill-benchmark/*_summary.json\"); assert len(files) == 1, files; data = json.load(open(files[0])); cfg = data[\"configurations\"][\"default\"]; assert cfg[\"result_set_accuracy\"] == 1.0 and cfg[\"sql_execution_success_rate\"] == 1.0, cfg"'
       - name: Run synthetic dataset registry smoke test
         run: |
           docker compose run --rm app sh -c \
@@ -85,7 +89,7 @@ jobs:
               --gold-as-generated \
               --initialize \
               --output-dir /tmp/schemadrill-multidataset &&
-             test -n "$(find /tmp/schemadrill-multidataset -name "*_summary.json" -size +0c -print -quit)"'
+             python -c "import glob, json; files = glob.glob(\"/tmp/schemadrill-multidataset/*_summary.json\"); assert len(files) == 4, files; summaries = [json.load(open(f)) for f in files]; assert {s[\"dataset\"] for s in summaries} == {\"chinook\", \"ecommerce\", \"organization\", \"complex_synthetic\"}; assert all(s[\"configurations\"][\"default\"][\"result_set_accuracy\"] == 1.0 and s[\"configurations\"][\"default\"][\"sql_execution_success_rate\"] == 1.0 for s in summaries), summaries"'
       - run: docker compose up -d app
       - name: Check API health
         run: |

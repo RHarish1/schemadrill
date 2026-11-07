@@ -4,9 +4,12 @@ WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 COPY frontend/ .
-ARG VITE_NEON_AUTH_URL=https://ep-shy-violet-b305q0j3.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth
-ENV VITE_NEON_AUTH_URL=${VITE_NEON_AUTH_URL}
-RUN npm run build
+ARG VITE_NEON_AUTH_URL
+RUN if [ -n "$VITE_NEON_AUTH_URL" ]; then \
+      VITE_NEON_AUTH_URL="$VITE_NEON_AUTH_URL" npm run build; \
+    else \
+      npm run build; \
+    fi
 
 FROM python:3.12-slim
 

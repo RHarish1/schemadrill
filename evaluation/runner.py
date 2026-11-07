@@ -84,6 +84,8 @@ def main() -> None:
             }
             summary["execution_accuracy"] = summary["result_set_accuracy"]
             print(json.dumps(summary, sort_keys=True))
+            if summary["result_set_accuracy"] < 1.0 or summary["execution_success_rate"] < 1.0:
+                raise RuntimeError(f"Evaluator smoke checks failed: {summary}")
         else:
             run_evaluator_smoke(args.questions, args.dataset)
     else:
