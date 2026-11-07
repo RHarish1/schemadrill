@@ -31,8 +31,14 @@ def _provisioning_database_url(settings: Settings) -> str:
     return settings.database_url
 
 
+def _is_readonly_role(database_url: str) -> bool:
+    return urlparse(database_url).username == "schemadrill_readonly"
+
+
 @lru_cache
 def _ensure_tenant_schema(database_url: str) -> None:
+    if _is_readonly_role(database_url):
+        return
     with psycopg.connect(database_url) as connection:
         connection.execute(_TENANT_SCHEMA)
         connection.commit()
@@ -54,8 +60,9 @@ def provision_user(user_id: str, settings: Settings | None = None) -> bool:
         )
         is_new_user = cursor.fetchone() is not None
         if is_new_user:
-            for script in _DEFAULT_DATASET_SCRIPTS:
-                connection.execute(script)
+            if not _is_readonly_role(database_url):
+                for script in _DEFAULT_DATASET_SCRIPTS:
+                    connection.execute(script)
             connection.cursor().executemany(
                 """
                 INSERT INTO public.user_datasets (dataset_id, user_id, label, schema_name)

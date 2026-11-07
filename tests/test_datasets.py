@@ -55,3 +55,48 @@ def test_provisioning_database_url_uses_ingest_for_readonly_role():
         ingest_database_url="postgresql://schemadrill_admin:schemadrill@localhost:5432/schemadrill",
     )
     assert _provisioning_database_url(managed_settings) == managed_settings.database_url
+
+
+def test_provision_user_skips_ddl_when_connected_as_readonly_role(monkeypatch):
+    from app.config import Settings
+    from app.tenant import _ensure_tenant_schema, provision_user
+
+    _ensure_tenant_schema.cache_clear()
+    executed_sql: list[str] = []
+    executemany_calls: list[tuple[str, list[tuple[str, str, str, str]]]] = []
+
+    class FakeCursor:
+        def fetchone(self):
+            return ("user-123",)
+
+        def executemany(self, query, params):
+            executemany_calls.append((query, list(params)))
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=None):
+            executed_sql.append(query)
+            return FakeCursor()
+
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            pass
+
+    monkeypatch.setattr("app.tenant.psycopg.connect", lambda url: FakeConnection())
+    readonly_remote_settings = Settings(
+        database_url="postgresql://schemadrill_readonly:secret@ep-demo.neon.tech/neondb",
+        ingest_database_url="postgresql://schemadrill_admin:schemadrill@localhost:5432/schemadrill",
+    )
+
+    assert provision_user("user-123", readonly_remote_settings) is True
+    assert len(executed_sql) == 1
+    assert "INSERT INTO public.users" in executed_sql[0]
+    assert len(executemany_calls) == 1
+    assert len(executemany_calls[0][1]) == 4
