@@ -86,8 +86,7 @@ flowchart TD
     Push --> CB["Cloud Build trigger<br/>cloudbuild.yaml"]
     CB --> B1[docker build<br/>PyPI fallback for torch]
     B1 --> B2["pytest inside image"]
-    B2 --> B3["export Cloud Run env to temp JSON"]
-    B3 --> B4["Live Gemini Chinook eval<br/>must be 100% result-set + execution success"]
+    B2 --> B4["Live Gemini Chinook eval (Secret Manager)<br/>must be 100% result-set + execution success"]
     B4 -->|pass| B5[docker push to Artifact Registry]
     B5 --> B6[gcloud run deploy schemadrill]
     B4 -->|fail| Stop([Deploy blocked])
@@ -149,7 +148,6 @@ Two DB roles: `schemadrill_readonly` (serving) and `schemadrill_admin` (ingestio
 - **Tenant isolation is by dataset ACL, not data isolation.** All users share the same physical `chinook`, `ecommerce`, and other schemas. `user_datasets` only controls who may query which `schema_name`. That is fine for read-only demo data but not for user-owned data.
 - `schemadrill_readonly` is granted `INSERT/UPDATE/DELETE` on `users` and `user_datasets` (`scripts/tenant.sql`). The SQL guard and read-only transaction mitigate this, but a dedicated writer role is cleaner.
 - The Gemini key is **server-owned**: you pay for all usage (the motivation for BYOK).
-- Cloud Build reads `DATABASE_URL` and `GEMINI_API_KEY` as **plain env values** from the Cloud Run service. Move them to Secret Manager.
 - Duplicate commits from a rebase (e.g. `c88289a`/`a3870bc`) exist in history. Cosmetic only.
 
 ## 8. Target architecture (planned, not implemented)

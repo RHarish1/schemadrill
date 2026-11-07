@@ -32,7 +32,7 @@ Example: "Show the 10 tracks with the longest duration."
 ### Phase 1: Foundation for tenancy (prerequisite)
 - [ ] Control-plane tables: `connections`, `credentials`, `query_history`, `usage`.
 - [ ] Separate writer role for control-plane tables. Remove write grants from `schemadrill_readonly`.
-- [ ] Secrets to Secret Manager. Remove plain env reads in `cloudbuild.yaml`.
+- [x] Secrets to Secret Manager (`availableSecrets` in `cloudbuild.yaml`).
 - [ ] Refactor `llm_client` and `pipeline` to take per-request `provider`, `model`, and `api_key`.
 - [ ] Refactor retrieval and `schema_embeddings` to key on `(user_id, connection_id)`.
 

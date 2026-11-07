@@ -11,29 +11,15 @@ steps:
     args:
       - "-q"
 
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - "gcloud run services describe schemadrill --region asia-south1 --format=json > /workspace/.service.json"
-
   - name: "asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/schemadrill:$COMMIT_SHA"
     entrypoint: "python"
+    secretEnv:
+      - "DATABASE_URL"
+      - "GEMINI_API_KEY"
     args:
       - "-c"
       - |
-        import json, os, subprocess
-        try:
-            with open("/workspace/.service.json", encoding="utf-8") as fh:
-                service = json.load(fh)
-            envs = service["spec"]["template"]["spec"]["containers"][0].get("env", [])
-            wanted = {"DATABASE_URL", "GEMINI_API_KEY", "MODEL_NAME", "EMBEDDING_MODEL"}
-            for item in envs:
-                if item.get("name") in wanted and "value" in item:
-                    os.environ[item["name"]] = item["value"]
-        finally:
-            if os.path.exists("/workspace/.service.json"):
-                os.remove("/workspace/.service.json")
+        import json, subprocess
         subprocess.run(
             ["python", "-m", "evaluation.runner", "--dataset", "chinook", "--output", "/tmp/chinook-eval.jsonl"],
             check=True,
@@ -64,7 +50,16 @@ steps:
       - "asia-south1"
       - "--platform"
       - "managed"
+      - "--update-secrets"
+      - "DATABASE_URL=schemadrill-database-url:latest,GEMINI_API_KEY=schemadrill-gemini-api-key:latest"
       - "--quiet"
+
+availableSecrets:
+  secretManager:
+    - versionName: "projects/$PROJECT_ID/secrets/schemadrill-database-url/versions/latest"
+      env: "DATABASE_URL"
+    - versionName: "projects/$PROJECT_ID/secrets/schemadrill-gemini-api-key/versions/latest"
+      env: "GEMINI_API_KEY"
 
 images:
   - "asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/schemadrill:$COMMIT_SHA"

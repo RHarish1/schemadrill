@@ -43,7 +43,7 @@ Derived from `git log` (2026-09-26 to 2026-11-07). Hashes are abbreviated.
 | Docker | `ModuleNotFoundError: ingest` | Copy `ingest/` into image | earlier fix |
 | Cloud Build | 331 MB wheel upload | `.gcloudignore` for `*.whl`, PyPI fallback in Dockerfile | `ffe92c9` |
 | Cloud Build | Custom service account needed a logs bucket | `CLOUD_LOGGING_ONLY` | `6f4b804` |
-| Cloud Build | Eval step needed runtime env and a `sh` entrypoint | Export service JSON, parse in app image, delete in `finally` | `73d9a4e` |
+| Cloud Build | Eval step needed `DATABASE_URL` and `GEMINI_API_KEY` from Secret Manager (`valueFrom.secretKeyRef`) | Inject secrets via `availableSecrets.secretManager` (`secretEnv`) | `73d9a4e`, latest |
 | Ingestion | Remote schema ingestion connection dropped | Keep-alive fix | `7ba112b`, `c227fe0` |
 | Frontend | API status out of sync | State sync fix | `10cc984` |
 | Frontend | Hardcoded auth URL in image | Export `VITE_NEON_AUTH_URL` only when set | `1d34e0a`, `22f91ef` |
