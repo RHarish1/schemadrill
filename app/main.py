@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     close_pool()
 
 
-app = FastAPI(title="SchemaDrill", version="0.2.1", lifespan=lifespan)
+app = FastAPI(title="SchemaDrill", version="0.2.2", lifespan=lifespan)
 
 
 @app.get("/health")

@@ -271,3 +271,17 @@ is acceptable.
 
 Each step is independently testable and shippable, and steps 1 to 3 already remove your Gemini
 bill without needing user databases.
+
+## 13. CI static analysis: CodeQL Advanced Setup vs Default Setup (shipped in v0.2.2)
+
+- **Decision:** Replace GitHub's dynamic CodeQL Default Setup with a committed
+  `.github/workflows/codeql.yml` workflow pinned to `github/codeql-action@v4.39.1`, scanning
+  `actions`, `javascript-typescript`, and `python` with `workflow_dispatch` enabled.
+- **Why:** Floating `github/codeql-action@v4` (`v4.39.2`) deleted the runner's pre-cached
+  `/opt/hostedtoolcache/CodeQL/2.27.3` bundle and repeatedly failed with `HTTP 504` downloading
+  `codeql-bundle-v2.27.4` from GitHub Releases, while `on: dynamic` hid **Re-run jobs** in the
+  UI. Pinning `v4.39.1` uses the pre-cached `2.27.3` bundle off local disk with zero download,
+  restores manual reruns, and extends coverage to the React/TypeScript frontend and Actions YAML.
+- **Alternatives considered:** Keeping Default Setup and pushing empty commits until GitHub's
+  `2.27.4` CDN recovered (rejected: flaky, unrepeatable, and Python-only); scanning Python only
+  in `codeql.yml` (rejected: misses `frontend/src` and `.github/workflows`).

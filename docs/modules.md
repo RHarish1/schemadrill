@@ -87,9 +87,12 @@ Ingestion uses the admin database URL and writes vectors. Serving uses the read-
 
 ## CI Ownership
 
-`.github/workflows/ci.yml` has two responsibilities:
+`.github/workflows/ci.yml` has three responsibilities:
 
+- **Frontend job:** `npm ci`, `npm audit --audit-level=high`, and `vite build`.
 - **Quality job:** Ruff, Black, and Python tests.
 - **Docker/Postgres job:** populate the ignored wheel cache, build the offline image, validate Compose, run the pgvector infrastructure benchmark, run the Chinook evaluator smoke test, and check API health.
+
+`.github/workflows/codeql.yml` runs CodeQL static security analysis across `actions`, `javascript-typescript`, and `python` on push, pull requests, weekly schedule, and manual `workflow_dispatch` (pinned to `github/codeql-action@v4.39.1` so runners reuse the pre-cached CodeQL `2.27.3` bundle instead of failing on upstream release-download `504` timeouts).
 
 The normal CI smoke test uses gold SQL as controlled generated SQL so it does not require a Gemini credential. Live generation and BIRD evaluation belong in manual or scheduled workflows once credentials, dataset licensing, and regression thresholds are configured.

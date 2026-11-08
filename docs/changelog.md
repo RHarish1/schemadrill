@@ -18,7 +18,8 @@ Derived from `git log` (2026-09-26 to 2026-11-08). Hashes are abbreviated.
 | 11-07 | Readonly auth and tenant provisioning fix, wheel handling, issuer normalization, **Cloud Build CI/CD with live-eval deploy gate** | `7a13432`, `ffe92c9`, `1d34e0a`, `fb62b1d`, `6f4b804`, `b2a71bf`, `73d9a4e` |
 | 11-08 | **v0.1.1**: gitignore private self-notes (`notes/`, `AGENTS.md`, `GEMINI.md`) | `cc1c910` |
 | 11-08 | **v0.2.0**: **Google auth completion** — JWT email/display name capture and backfill, `GET /api/me`, signed-in identity chip, cross-tab sign-out, session-expiry refresh and draft preservation | `acf122d` |
-| 11-08 | **v0.2.1**: patch bump to retrigger GitHub dynamic CodeQL scan after upstream 504 timeout | this commit |
+| 11-08 | **v0.2.1**: patch bump to retrigger GitHub dynamic CodeQL scan after upstream 504 timeout | `92d3353` |
+| 11-08 | **v0.2.2**: add committed `.github/workflows/codeql.yml` (`v4.39.1`, Python + JS/TS + Actions) to use runner-cached CodeQL `2.27.3` | this commit |
 
 ## Feature inventory
 
@@ -53,6 +54,7 @@ Derived from `git log` (2026-09-26 to 2026-11-08). Hashes are abbreviated.
 | CI | Frontend `npm audit` blockers | Dependency overrides | `4555052` |
 | CI | Secrets printed by compose config | Avoid printing | `07e423d` |
 | CI | Ruff/Black failures | Formatting fixes | `d3bc8ed` |
+| CI | GitHub Default Setup CodeQL (`@v4`) deleted runner-cached `2.27.3` and failed with `504` fetching `2.27.4` | Switch to `.github/workflows/codeql.yml` pinned to `v4.39.1` (`2.27.3` toolcache) | latest |
 | Database | Read-only role lost its login/password, so 5 min `PoolTimeout` | Restore `LOGIN PASSWORD`/`ALTER ROLE` in `init.sql` | `7a13432` |
 | Database | Synthetic datasets unreadable by serving role | `GRANT USAGE/SELECT` in dataset init | `7a13432` |
 | Tenancy | 500 `InsufficientPrivilege` on `/api/datasets` and `/query` | Use `INGEST_DATABASE_URL` for provisioning when serving as read-only | `7a13432` |

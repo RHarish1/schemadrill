@@ -142,6 +142,7 @@ Two DB roles: `schemadrill_readonly` (serving) and `schemadrill_admin` (ingestio
 | 16 | **Tenant keyed on JWT `sub`**; lazy idempotent `provision_user` seeds default datasets | No signup webhook needed | First request pays the provisioning cost |
 | 17 | **Split provisioning URL**: admin URL used when the serving URL is the read-only role | Read-only role cannot create schemas | Two credentials in config |
 | 18 | **Cloud Run Source/Artifact Registry deploy, `min=0`**, Cloud Logging only | Low-cost demo | Cold starts |
+| 19 | **Committed CodeQL Advanced Setup (`codeql.yml`) pinned to `v4.39.1`** (`actions`, `javascript-typescript`, `python`) | GitHub Default Setup (`dynamic`, `@v4`) deleted pre-cached `2.27.3`, hit `504` downloading `2.27.4`, and disabled UI reruns | Requires Default Setup disabled in repo settings; bump pinned tag periodically |
 
 ## 7. Known gaps and risks (honest list)
 
