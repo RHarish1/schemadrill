@@ -175,7 +175,39 @@ def test_provision_user_captures_identity_and_backfills_existing_user(monkeypatc
     )
     assert len(executed_calls) == 2
     assert "INSERT INTO public.users" in executed_calls[0][0]
-    assert "UPDATE public.users" in executed_calls[1][0]
+    update_sql, update_params = executed_calls[1]
+    assert "UPDATE public.users" in update_sql
+    assert "IS NOT NULL" not in update_sql
+    assert update_sql.count("%s") == update_sql.count("%s::text") == 5
+    assert update_params == (
+        "dana@example.com",
+        "Dana Scully",
+        "user-456",
+        "dana@example.com",
+        "Dana Scully",
+    )
+
+    executed_calls.clear()
+    assert (
+        provision_user(
+            "user-456",
+            settings,
+            email="dana@example.com",
+            display_name=None,
+        )
+        is False
+    )
+    assert executed_calls[1][1] == (
+        "dana@example.com",
+        None,
+        "user-456",
+        "dana@example.com",
+        None,
+    )
+
+    executed_calls.clear()
+    assert provision_user("user-456", settings, email=None, display_name="   ") is False
+    assert len(executed_calls) == 1
 
     assert get_user("user-456", settings) == AuthenticatedUser(
         user_id="user-456",

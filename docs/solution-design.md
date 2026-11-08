@@ -228,9 +228,12 @@ is acceptable.
    - *Decision:* `current_user()` extracts `sub`, `email`, and `name`/`display_name` from the
      verified Neon Auth JWT (top-level or nested `user` claims). `provision_user()` inserts
      `(user_id, email, display_name)` with `ON CONFLICT (user_id) DO NOTHING RETURNING user_id`;
-     only when no row is returned does it run an `UPDATE ... SET email = COALESCE(...),
-     display_name = COALESCE(...) WHERE ... IS DISTINCT FROM ...`, and `GET /api/me` returns
-     the stored `AuthenticatedUser`.
+     only when no row is returned does it run an `UPDATE ... SET email = COALESCE(%s::text, email),
+     display_name = COALESCE(%s::text, display_name) WHERE user_id = %s::text AND (email IS DISTINCT
+     FROM COALESCE(%s::text, email) OR display_name IS DISTINCT FROM COALESCE(%s::text,
+     display_name))`, and `GET /api/me` returns the stored `AuthenticatedUser`. Explicit `::text`
+     casts are required because `psycopg` v3 binds `$N` parameters via PostgreSQL's server-side
+     extended query protocol rather than client-side literal interpolation.
    - *Why:* Preserves exact `is_new_user` detection for one-time default dataset seeding,
      backfills existing `public.users` rows that predated profile capture, and avoids dead-tuple
      writes on unchanged subsequent requests.

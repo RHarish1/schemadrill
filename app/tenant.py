@@ -95,12 +95,12 @@ def provision_user(
                 """
                 UPDATE public.users
                 SET
-                    email = COALESCE(%s, email),
-                    display_name = COALESCE(%s, display_name)
-                WHERE user_id = %s
+                    email = COALESCE(%s::text, email),
+                    display_name = COALESCE(%s::text, display_name)
+                WHERE user_id = %s::text
                   AND (
-                      (%s IS NOT NULL AND email IS DISTINCT FROM %s)
-                      OR (%s IS NOT NULL AND display_name IS DISTINCT FROM %s)
+                      email IS DISTINCT FROM COALESCE(%s::text, email)
+                      OR display_name IS DISTINCT FROM COALESCE(%s::text, display_name)
                   )
                 """,
                 (
@@ -108,8 +108,6 @@ def provision_user(
                     clean_display_name,
                     user_id,
                     clean_email,
-                    clean_email,
-                    clean_display_name,
                     clean_display_name,
                 ),
             )
