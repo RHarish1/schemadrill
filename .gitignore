@@ -18,3 +18,8 @@ frontend/.env
 frontend/.env.local
 .neon
 node_modules/
+
+# Private self-notes (interview prep) - never commit
+AGENTS.md
+GEMINI.md
+notes/

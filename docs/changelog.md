@@ -16,6 +16,7 @@ Derived from `git log` (2026-09-26 to 2026-11-07). Hashes are abbreviated.
 | 11-03 | Frontend audit blockers resolved | `4555052` |
 | 11-06 | **Authenticated default dataset provisioning** | `231e1cb` |
 | 11-07 | Readonly auth and tenant provisioning fix, wheel handling, issuer normalization, **Cloud Build CI/CD with live-eval deploy gate** | `7a13432`, `ffe92c9`, `1d34e0a`, `fb62b1d`, `6f4b804`, `b2a71bf`, `73d9a4e` |
+| 11-08 | **v0.1.1**: gitignore private self-notes (`notes/`, `AGENTS.md`, `GEMINI.md`) | this commit |
 
 ## Feature inventory
 
