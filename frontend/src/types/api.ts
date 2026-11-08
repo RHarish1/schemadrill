@@ -14,6 +14,12 @@ export interface DatasetCatalogResponse {
   datasets: DatasetOption[];
 }
 
+export interface UserProfile {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+}
+
 export interface QueryResult {
   status: "success" | "failed";
   sql: string | null;

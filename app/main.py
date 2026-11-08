@@ -7,15 +7,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from redis import asyncio as redis_asyncio
 
-from app.auth import current_user_id
+from app.auth import current_user, current_user_id
 from app.config import get_settings
 from app.db import close_pool
 from app.embedding import get_embedding_model
 from app.llm_client import provider_metrics
-from app.models import QueryRequest, QueryResult
+from app.models import AuthenticatedUser, QueryRequest, QueryResult
 from app.pipeline import run_pipeline
 from app.reliability import AllowAllRateLimiter, RedisRateLimiter, ReliabilityMetrics
-from app.tenant import provision_user, user_has_dataset
+from app.tenant import get_user, provision_user, user_has_dataset
 from evaluation.datasets import dataset_catalog
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     close_pool()
 
 
-app = FastAPI(title="SchemaDrill", version="0.1.1", lifespan=lifespan)
+app = FastAPI(title="SchemaDrill", version="0.2.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -50,10 +50,29 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/me", response_model=AuthenticatedUser)
+def me(request: Request) -> AuthenticatedUser:
+    settings = get_settings()
+    user = current_user(request)
+    provision_user(
+        user.user_id,
+        settings,
+        email=user.email,
+        display_name=user.display_name,
+    )
+    return get_user(user.user_id, settings) or user
+
+
 @app.get("/api/datasets")
 def datasets(request: Request) -> dict[str, list[dict[str, object]]]:
-    user_id = current_user_id(request)
-    provision_user(user_id)
+    settings = get_settings()
+    user = current_user(request)
+    provision_user(
+        user.user_id,
+        settings,
+        email=user.email,
+        display_name=user.display_name,
+    )
     return {"datasets": dataset_catalog()}
 
 
@@ -68,8 +87,14 @@ def metrics(request: Request) -> dict[str, int]:
 @app.post("/query", response_model=QueryResult)
 async def query(request: Request, payload: QueryRequest) -> QueryResult:
     settings = get_settings()
-    user_id = current_user_id(request)
-    provision_user(user_id, settings)
+    user = current_user(request)
+    user_id = user.user_id
+    provision_user(
+        user_id,
+        settings,
+        email=user.email,
+        display_name=user.display_name,
+    )
     if not user_has_dataset(user_id, payload.db, settings):
         raise HTTPException(status_code=404, detail="Dataset not found")
     client_key = f"user:{user_id}"

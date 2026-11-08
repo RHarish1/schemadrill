@@ -7,6 +7,12 @@ class SqlResponse(BaseModel):
     sql: str = Field(min_length=1)
 
 
+class AuthenticatedUser(BaseModel):
+    user_id: str = Field(min_length=1)
+    email: str | None = None
+    display_name: str | None = None
+
+
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1)
     db: str = Field(min_length=1, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")

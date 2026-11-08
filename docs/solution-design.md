@@ -216,12 +216,42 @@ service's plain env values.
 - Move the schema creation out of the request path into a migration step (for example a
   small `scripts/migrate.py` run at deploy time) so serving roles don't need DDL rights.
 
-## 11. Handling the Google and Neon identity split
+## 11. Handling the Google and Neon identity split and session lifecycle (shipped in v0.2.0)
 
 Google sign-in (Neon Auth on **your** project) and the user's own Neon account are unrelated
 identities. Do not try to match them. The link is just rows in `connections` owned by your
 `user_id` (the JWT `sub`). A user with several Google accounts has separate workspaces, which
-is acceptable. Optionally store `email` from the JWT on first sign-in for display.
+is acceptable.
+
+**Shipped design decisions for Google authentication:**
+1. **Profile capture and conditional backfill from verified JWT claims.**
+   - *Decision:* `current_user()` extracts `sub`, `email`, and `name`/`display_name` from the
+     verified Neon Auth JWT (top-level or nested `user` claims). `provision_user()` inserts
+     `(user_id, email, display_name)` with `ON CONFLICT (user_id) DO NOTHING RETURNING user_id`;
+     only when no row is returned does it run an `UPDATE ... SET email = COALESCE(...),
+     display_name = COALESCE(...) WHERE ... IS DISTINCT FROM ...`, and `GET /api/me` returns
+     the stored `AuthenticatedUser`.
+   - *Why:* Preserves exact `is_new_user` detection for one-time default dataset seeding,
+     backfills existing `public.users` rows that predated profile capture, and avoids dead-tuple
+     writes on unchanged subsequent requests.
+   - *Alternatives considered:* Unconditional `INSERT ... ON CONFLICT DO UPDATE RETURNING`
+     (rejected: `RETURNING` fires on every call, breaking `is_new_user` detection and writing a
+     new heap tuple per request); separate Neon Auth server lookup (rejected: Better Auth's JWT
+     plugin already embeds `session.user` claims in the signed token).
+2. **Client 401 refresh-before-expire, cross-tab sign-out, and OAuth draft preservation.**
+   - *Decision:* The SPA uses `@neondatabase/auth` with `BetterAuthReactAdapter()`. On an
+     authenticated `401`, `api.ts` forces one fresh session/JWT fetch (`X-Force-Fetch: true`)
+     and retries once before notifying session expiry. Active sessions also revalidate on window
+     focus/`visibilitychange` and at `session.expiresAt`. Explicit sign-out broadcasts across
+     tabs via `BroadcastChannel` (clearing UI state without raising an expiry warning) and clears
+     draft state, whereas re-signing in after expiry stashes any draft `{question, dataset}` in
+     `sessionStorage` across the full-page Google OAuth redirect.
+   - *Why:* Neon Auth JWTs expire every 15 minutes while the Better Auth cookie session lasts
+     longer; retrying once with a forced refresh absorbs clock skew and stale cached tokens
+     transparently, while preserving typed SQL questions when a session genuinely expires.
+   - *Alternatives considered:* Treating every `401` as immediate logout (rejected: interrupts
+     users whose cookie session is still valid); storing drafts in `localStorage` (rejected:
+     `sessionStorage` scopes drafts to the tab and clears cleanly on sign-out or tab close).
 
 ## 12. Cost and abuse (free project)
 

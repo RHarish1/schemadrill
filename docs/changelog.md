@@ -1,6 +1,6 @@
 # Shipped Features and Bugs Solved
 
-Derived from `git log` (2026-09-26 to 2026-11-07). Hashes are abbreviated.
+Derived from `git log` (2026-09-26 to 2026-11-08). Hashes are abbreviated.
 
 ## Timeline of shipped features
 
@@ -16,17 +16,18 @@ Derived from `git log` (2026-09-26 to 2026-11-07). Hashes are abbreviated.
 | 11-03 | Frontend audit blockers resolved | `4555052` |
 | 11-06 | **Authenticated default dataset provisioning** | `231e1cb` |
 | 11-07 | Readonly auth and tenant provisioning fix, wheel handling, issuer normalization, **Cloud Build CI/CD with live-eval deploy gate** | `7a13432`, `ffe92c9`, `1d34e0a`, `fb62b1d`, `6f4b804`, `b2a71bf`, `73d9a4e` |
-| 11-08 | **v0.1.1**: gitignore private self-notes (`notes/`, `AGENTS.md`, `GEMINI.md`) | this commit |
+| 11-08 | **v0.1.1**: gitignore private self-notes (`notes/`, `AGENTS.md`, `GEMINI.md`) | `cc1c910` |
+| 11-08 | **v0.2.0**: **Google auth completion** — JWT email/display name capture and backfill, `GET /api/me`, signed-in identity chip, cross-tab sign-out, session-expiry refresh and draft preservation | this commit |
 
 ## Feature inventory
 
-- **Query API** (`POST /query`), datasets API (`/api/datasets`), metrics, public `/health`.
+- **Query API** (`POST /query`), datasets API (`/api/datasets`), user profile API (`GET /api/me`), metrics, public `/health`.
 - **Retrieval**: pgvector HNSW over per-table DDL, optional FK expansion, full-schema baseline, pluggable provider interface.
 - **Generation**: Gemini via Instructor, structured `SqlResponse`, stateless bounded self-correction.
 - **Safety**: AST SQL guard (24 adversarial tests), `EXPLAIN` gate, read-only transaction and role, row cap.
 - **Reliability**: Redis rate limit per user, concurrency admission, provider backoff and timeouts.
-- **Auth and tenancy**: Neon Auth (Google provider) JWT verification, per-user dataset registry, idempotent provisioning.
-- **Frontend**: React/Vite SPA, dataset dropdown, example questions, API status, auth session.
+- **Auth and tenancy**: Neon Auth (Google provider) JWT verification, user profile capture/backfill (`email`, `display_name`), per-user dataset registry, idempotent provisioning.
+- **Frontend**: React/Vite SPA, dataset dropdown, example questions, API status, signed-in user identity chip, cross-tab sign-out, 401 token refresh, session-expiry prompt with OAuth draft preservation.
 - **Evaluation**: result-set accuracy, execution success, AST similarity, retries, tokens, stage latency (mean/median/p95), ablation matrix, repeated runs, BIRD loader, Chinook cases.
 - **CI/CD**: GitHub Actions (lint, tests, frontend, Docker smoke) and Cloud Build (pytest and live Gemini 100% gate before deploy).
 

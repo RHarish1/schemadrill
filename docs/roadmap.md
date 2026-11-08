@@ -27,7 +27,7 @@ flowchart TD
 
 | # | Feature | Status | Reality check against the code |
 | --- | --- | --- | --- |
-| 1 | **Google authentication** | **Mostly shipped** | Neon Auth with Google, JWT verification, user record. Remaining: capture email/name, sign-out and session-expiry UX |
+| 1 | **Google authentication** | **Shipped** | Neon Auth with Google, JWT verification, user record with email/display name capture, sign-out and session-expiry UX |
 | 2 | **Connect your Neon database** | Planned | Replaces "Neon authorization". Connection-string based, no OAuth. Not started |
 | 3 | **BYOK (multi-provider)** | Planned | Gemini key is a global setting today (`app/config.py`) |
 | 4 | **Run SQL through the website** | **Partly shipped** | Works on curated shared datasets. Remaining: run on the user's own database |

@@ -100,3 +100,85 @@ def test_provision_user_skips_ddl_when_connected_as_readonly_role(monkeypatch):
     assert "INSERT INTO public.users" in executed_sql[0]
     assert len(executemany_calls) == 1
     assert len(executemany_calls[0][1]) == 4
+
+
+def test_provision_user_captures_identity_and_backfills_existing_user(monkeypatch):
+    from app.config import Settings
+    from app.models import AuthenticatedUser
+    from app.tenant import _ensure_tenant_schema, get_user, provision_user
+
+    _ensure_tenant_schema.cache_clear()
+    executed_calls: list[tuple[str, tuple | None]] = []
+    is_new = True
+    stored_row = ("user-456", "dana@example.com", "Dana Scully")
+
+    class FakeCursor:
+        def __init__(self, row):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+        def executemany(self, query, params):
+            executed_calls.append((query, tuple(params)))
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=None):
+            executed_calls.append((query, params))
+            if "INSERT INTO public.users" in query:
+                return FakeCursor(("user-456",) if is_new else None)
+            if "SELECT user_id, email, display_name" in query:
+                return FakeCursor(stored_row)
+            return FakeCursor(None)
+
+        def cursor(self):
+            return FakeCursor(None)
+
+        def commit(self):
+            pass
+
+    monkeypatch.setattr("app.tenant.psycopg.connect", lambda url: FakeConnection())
+    settings = Settings(
+        database_url="postgresql://schemadrill_readonly:secret@ep-demo.neon.tech/neondb",
+        ingest_database_url="postgresql://schemadrill_admin:schemadrill@localhost:5432/schemadrill",
+    )
+
+    assert (
+        provision_user(
+            "user-456",
+            settings,
+            email=" dana@example.com ",
+            display_name=" Dana Scully ",
+        )
+        is True
+    )
+    insert_sql, insert_params = executed_calls[0]
+    assert "INSERT INTO public.users (user_id, email, display_name)" in insert_sql
+    assert insert_params == ("user-456", "dana@example.com", "Dana Scully")
+
+    executed_calls.clear()
+    is_new = False
+    assert (
+        provision_user(
+            "user-456",
+            settings,
+            email="dana@example.com",
+            display_name="Dana Scully",
+        )
+        is False
+    )
+    assert len(executed_calls) == 2
+    assert "INSERT INTO public.users" in executed_calls[0][0]
+    assert "UPDATE public.users" in executed_calls[1][0]
+
+    assert get_user("user-456", settings) == AuthenticatedUser(
+        user_id="user-456",
+        email="dana@example.com",
+        display_name="Dana Scully",
+    )

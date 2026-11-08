@@ -7,8 +7,10 @@ import jwt
 from fastapi import HTTPException, Request
 
 from app.config import get_settings
+from app.models import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
+_WWW_AUTHENTICATE_BEARER = {"WWW-Authenticate": "Bearer"}
 
 
 def _allowed_issuers(issuer: str) -> list[str] | None:
@@ -20,6 +22,16 @@ def _allowed_issuers(issuer: str) -> list[str] | None:
     return list(dict.fromkeys([cleaned, origin]))
 
 
+def _optional_claim_str(claims: dict[str, object], *keys: str) -> str | None:
+    for key in keys:
+        value = claims.get(key)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+    return None
+
+
 @lru_cache
 def _jwks_client() -> jwt.PyJWKClient:
     settings = get_settings()
@@ -28,13 +40,21 @@ def _jwks_client() -> jwt.PyJWKClient:
     return jwt.PyJWKClient(settings.neon_auth_jwks_url)
 
 
-def current_user_id(request: Request) -> str:
+def current_user(request: Request) -> AuthenticatedUser:
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+            headers=_WWW_AUTHENTICATE_BEARER,
+        )
     token = authorization[7:].strip()
     if not token:
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+            headers=_WWW_AUTHENTICATE_BEARER,
+        )
     try:
         signing_key = _jwks_client().get_signing_key_from_jwt(token)
         settings = get_settings()
@@ -52,10 +72,39 @@ def current_user_id(request: Request) -> str:
         )
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail="Authentication is not configured") from error
+    except jwt.ExpiredSignatureError as error:
+        logger.info("authentication_token_expired")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token expired",
+            headers=_WWW_AUTHENTICATE_BEARER,
+        ) from error
     except (jwt.PyJWTError, json.JSONDecodeError, OSError) as error:
         logger.warning("authentication_token_rejected error_type=%s", type(error).__name__)
-        raise HTTPException(status_code=401, detail="Invalid authentication token") from error
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token",
+            headers=_WWW_AUTHENTICATE_BEARER,
+        ) from error
     user_id = claims.get("sub")
-    if not isinstance(user_id, str) or not user_id:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-    return user_id
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token",
+            headers=_WWW_AUTHENTICATE_BEARER,
+        )
+    nested_user = claims.get("user")
+    nested_claims = nested_user if isinstance(nested_user, dict) else {}
+    email = _optional_claim_str(claims, "email") or _optional_claim_str(nested_claims, "email")
+    display_name = _optional_claim_str(claims, "name", "display_name") or _optional_claim_str(
+        nested_claims, "name", "display_name"
+    )
+    return AuthenticatedUser(
+        user_id=user_id.strip(),
+        email=email,
+        display_name=display_name,
+    )
+
+
+def current_user_id(request: Request) -> str:
+    return current_user(request).user_id

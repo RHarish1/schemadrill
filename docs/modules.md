@@ -25,9 +25,9 @@ evaluation.runner
 
 | Module | Responsibility | Main contract | Side effects |
 | --- | --- | --- | --- |
-| `app/main.py` | FastAPI application and HTTP boundary | `POST /query` accepts `QueryRequest`, returns `QueryResult` | Converts uncaught request errors to HTTP 500; closes the DB pool on shutdown |
+| `app/main.py` | FastAPI application and HTTP boundary | `POST /query` accepts `QueryRequest`, returns `QueryResult`; `GET /api/me` returns `AuthenticatedUser` | Converts uncaught request errors to HTTP 500; closes the DB pool on shutdown |
 | `app/config.py` | Environment-backed configuration | `Settings`, `get_settings()` | Loads `.env`; configures logging once through an LRU cache |
-| `app/models.py` | Pydantic request, response, DDL, retry, and exception contracts | `QueryRequest`, `QueryResult`, `SqlResponse`, `RetryState`, `DDLBlock` | Validation only; no I/O |
+| `app/models.py` | Pydantic request, response, DDL, retry, and exception contracts | `AuthenticatedUser`, `QueryRequest`, `QueryResult`, `SqlResponse`, `RetryState`, `DDLBlock` | Validation only; no I/O |
 | `app/pipeline.py` | Ordered query workflow and retry orchestration | `PipelineStage: RetryState -> RetryState`; `run_pipeline()` | Calls retrieval, Gemini, PostgreSQL `EXPLAIN`, and execution; retains only latest retry SQL/error |
 | `app/prompting.py` | Stateless Gemini prompt construction | `build_messages()`, `messages_for_retry()` | Logs the exact generated prompt; does not accumulate prior messages |
 | `app/llm_client.py` | Structured Gemini generation and token counting | `generate()`, `count_prompt_tokens()` | Network calls to Gemini; validates output as `SqlResponse` through Instructor |
@@ -35,8 +35,8 @@ evaluation.runner
 | `app/embedding.py` | Config-selected sentence-transformer loading and embedding | `embed_passage()`, `embed_query()` | Loads and caches the configured embedding model; CPU model loading can be expensive |
 | `app/db.py` | Shared PostgreSQL connection-pool boundary | `readonly_connection()`, `close_pool()` | Opens pooled connections and sets transactions read-only |
 | `app/sql_guard.py` | Deterministic SQL security boundary | `guard_sql()`, `SQLGuardResult`, `default_guard_config()` | Parses PostgreSQL ASTs; enforces single SELECT, RBAC table scope, blocked functions, and AST-based LIMIT policy |
-| `app/auth.py` | Neon Auth JWT verification | `current_user_id(request)` | Fetches and caches JWKS; accepts EdDSA/RS256; checks issuer (configured value and normalized origin) and optional audience; returns `sub` or raises 401/503 |
-| `app/tenant.py` | Per-user provisioning and dataset ACL | `provision_user()`, `user_has_dataset()` | Ensures `users`/`user_datasets` tables; on first sight of a user seeds default datasets. Uses `INGEST_DATABASE_URL` when serving as the read-only role |
+| `app/auth.py` | Neon Auth JWT verification | `current_user(request)`, `current_user_id(request)` | Fetches and caches JWKS; accepts EdDSA/RS256; checks issuer (configured value and normalized origin) and optional audience; extracts `sub`, `email`, and `display_name`, or raises 401/503 |
+| `app/tenant.py` | Per-user provisioning and dataset ACL | `provision_user()`, `get_user()`, `user_has_dataset()` | Ensures `users`/`user_datasets` tables; captures/backfills user email and display name; on first sight of a user seeds default datasets. Uses `INGEST_DATABASE_URL` when serving as the read-only role |
 | `app/reliability.py` | Rate limiting and provider metrics | `RedisRateLimiter`, `AllowAllRateLimiter`, `ReliabilityMetrics` | Redis calls; counters for rejections and timeouts |
 | `app/executor.py` | PostgreSQL dry-run and bounded result execution | `dry_run()`, `execute()` | Runs `EXPLAIN`, fetches at most `max_result_rows + 1`, raises `RowCapExceeded`, returns a DataFrame |
 

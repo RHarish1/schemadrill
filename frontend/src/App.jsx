@@ -1,18 +1,84 @@
-import { useEffect, useMemo, useState } from "react";
-import { ApiRequestError, checkHealth, listDatasets, queryDatabase } from "./services/api";
-import { authClient } from "./auth";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiRequestError,
+  checkHealth,
+  getCurrentUser,
+  listDatasets,
+  queryDatabase,
+} from "./services/api";
+import {
+  authClient,
+  broadcastAuthEvent,
+  consumeDraftQuery,
+  fetchAuthSession,
+  onCrossTabAuthEvent,
+  onSessionExpired,
+  saveDraftQuery,
+  signOutUser,
+} from "./auth";
 import "./styles.css";
 
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+function getUserInitial(user) {
+  const source = (user?.name || user?.email || "U").trim();
+  return (source[0] || "U").toUpperCase();
+}
+
 function App() {
+  const initialDraft = useMemo(() => consumeDraftQuery(), []);
   const [datasets, setDatasets] = useState([]);
-  const [dataset, setDataset] = useState("");
-  const [question, setQuestion] = useState("");
+  const [datasetsLoading, setDatasetsLoading] = useState(false);
+  const [dataset, setDataset] = useState(initialDraft?.dataset || "");
+  const [question, setQuestion] = useState(initialDraft?.question || "");
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [apiOnline, setApiOnline] = useState(null);
   const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(authClient));
+  const [signingIn, setSigningIn] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const [avatarBroken, setAvatarBroken] = useState(false);
+  const hadActiveSessionRef = useRef(false);
+
   const selectedDataset = datasets.find((item) => item.id === dataset);
+  const signedInUserId = user?.id || (session ? "authenticated" : "");
+
+  const markSessionExpired = useCallback(() => {
+    hadActiveSessionRef.current = false;
+    setSession(null);
+    setUser(null);
+    setDatasets([]);
+    setDataset("");
+    setSessionExpired(true);
+    setAuthError(null);
+  }, []);
+
+  const applyAuthenticatedSession = useCallback((sessionData) => {
+    hadActiveSessionRef.current = true;
+    setSession(sessionData.session);
+    setUser(sessionData.user);
+    setAvatarBroken(false);
+    setSessionExpired(false);
+    setAuthError(null);
+  }, []);
+
+  const revalidateSession = useCallback(
+    async (forceRefresh = true) => {
+      if (!authClient) return;
+      const nextSession = await fetchAuthSession({ forceRefresh });
+      if (nextSession) {
+        applyAuthenticatedSession(nextSession);
+      } else if (hadActiveSessionRef.current) {
+        markSessionExpired();
+      }
+    },
+    [applyAuthenticatedSession, markSessionExpired],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -34,54 +100,204 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!session) {
-      setDatasets([]);
-      setDataset("");
+    if (!authClient) {
+      setAuthLoading(false);
       return;
     }
     let cancelled = false;
-    listDatasets()
-      .then(({ datasets: availableDatasets }) => {
+    fetchAuthSession()
+      .then((sessionData) => {
         if (cancelled) return;
-        setDatasets(availableDatasets);
-        setDataset((currentDataset) => currentDataset || availableDatasets[0]?.id || "");
+        if (sessionData) {
+          applyAuthenticatedSession(sessionData);
+          broadcastAuthEvent("SIGNED_IN");
+        }
       })
-      .catch(() => {
-        if (!cancelled) setDatasets([]);
+      .finally(() => {
+        if (!cancelled) setAuthLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [applyAuthenticatedSession]);
 
   useEffect(() => {
-    if (!authClient) return;
-    authClient.getSession().then(({ data }) => setSession(data?.session ?? null));
-  }, []);
+    const unsubscribeExpired = onSessionExpired(() => {
+      markSessionExpired();
+    });
+    const unsubscribeCrossTab = onCrossTabAuthEvent((eventType) => {
+      if (eventType === "SIGNED_OUT") {
+        hadActiveSessionRef.current = false;
+        setSession(null);
+        setUser(null);
+        setDatasets([]);
+        setDataset("");
+        setResult(null);
+        setError(null);
+        setSessionExpired(false);
+        setAuthError(null);
+      } else if (eventType === "SIGNED_IN" && !hadActiveSessionRef.current) {
+        fetchAuthSession({ forceRefresh: true }).then((sessionData) => {
+          if (sessionData) applyAuthenticatedSession(sessionData);
+        });
+      }
+    });
+    return () => {
+      unsubscribeExpired();
+      unsubscribeCrossTab();
+    };
+  }, [applyAuthenticatedSession, markSessionExpired]);
+
+  useEffect(() => {
+    if (!session || !authClient) return;
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      revalidateSession(true);
+    };
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    let expiryTimer = null;
+    if (session.expiresAt) {
+      const expiresMs = new Date(session.expiresAt).getTime();
+      if (!Number.isNaN(expiresMs)) {
+        const delayMs = Math.min(Math.max(expiresMs - Date.now() + 250, 0), MAX_TIMEOUT_MS);
+        expiryTimer = window.setTimeout(() => {
+          revalidateSession(true);
+        }, delayMs);
+      }
+    }
+
+    return () => {
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      if (expiryTimer !== null) window.clearTimeout(expiryTimer);
+    };
+  }, [revalidateSession, session]);
+
+  useEffect(() => {
+    if (!signedInUserId) {
+      setDatasets([]);
+      setDatasetsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDatasetsLoading(true);
+    Promise.allSettled([listDatasets(), getCurrentUser()])
+      .then(([datasetsResult, profileResult]) => {
+        if (cancelled) return;
+        if (datasetsResult.status === "fulfilled") {
+          const availableDatasets = datasetsResult.value.datasets;
+          setDatasets(availableDatasets);
+          setDataset((currentDataset) =>
+            availableDatasets.some((item) => item.id === currentDataset)
+              ? currentDataset
+              : availableDatasets[0]?.id || "",
+          );
+        } else {
+          setDatasets([]);
+        }
+        if (profileResult.status === "fulfilled" && profileResult.value) {
+          const profile = profileResult.value;
+          setUser((currentUser) => ({
+            id: currentUser?.id || profile.user_id,
+            name: currentUser?.name || profile.display_name || null,
+            email: currentUser?.email || profile.email || null,
+            image: currentUser?.image || null,
+          }));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDatasetsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedInUserId]);
 
   async function signIn() {
-    await authClient?.signIn.social({ provider: "google", callbackURL: window.location.origin });
+    if (!authClient) {
+      setAuthError("Google sign-in is not configured for this environment.");
+      return;
+    }
+    if (signingIn) return;
+    saveDraftQuery({ question, dataset });
+    setSigningIn(true);
+    setAuthError(null);
+    try {
+      const response = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: window.location.origin,
+      });
+      if (response?.error) {
+        setAuthError(response.error.message || "Could not start Google sign-in. Please try again.");
+        setSigningIn(false);
+      }
+    } catch (signInError) {
+      setAuthError(
+        signInError instanceof Error && signInError.message
+          ? signInError.message
+          : "Could not start Google sign-in. Please try again.",
+      );
+      setSigningIn(false);
+    }
+  }
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    setAuthError(null);
+    hadActiveSessionRef.current = false;
+    try {
+      await signOutUser();
+    } finally {
+      setSession(null);
+      setUser(null);
+      setDatasets([]);
+      setDataset("");
+      setResult(null);
+      setError(null);
+      setSessionExpired(false);
+      setSigningOut(false);
+    }
   }
 
   async function submitQuery(event) {
     event?.preventDefault();
     const cleanQuestion = question.trim();
     if (!cleanQuestion || loading) return;
+    if (!session) {
+      setAuthError("Sign in with Google to run queries.");
+      return;
+    }
+    if (!dataset) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
       const payload = await queryDatabase({ db: dataset, question: cleanQuestion });
       if (payload.status === "failed") {
-        setError({ message: payload.reason || "The query could not be executed.", details: payload });
+        setError({
+          message: payload.reason || "The query could not be executed.",
+          details: payload,
+        });
       } else {
         setApiOnline(true);
-        setResult({ ...payload, question: cleanQuestion });
+        setResult({
+          ...payload,
+          question: cleanQuestion,
+          dataset: selectedDataset?.label || dataset,
+        });
       }
     } catch (requestError) {
+      if (requestError instanceof ApiRequestError && requestError.status === 401) {
+        return;
+      }
       setError({
-        message: requestError instanceof ApiRequestError ? requestError.message : "Something went wrong.",
-        details: requestError instanceof ApiRequestError ? requestError.technicalDetails : undefined,
+        message:
+          requestError instanceof ApiRequestError ? requestError.message : "Something went wrong.",
+        details:
+          requestError instanceof ApiRequestError ? requestError.technicalDetails : undefined,
       });
     } finally {
       setLoading(false);
@@ -92,6 +308,9 @@ function App() {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") submitQuery(event);
   }
 
+  const displayName = user?.name || user?.email || "Signed in";
+  const secondaryEmail = user?.name && user?.email && user.name !== user.email ? user.email : null;
+
   return (
     <div className="app-shell">
       <header className="nav">
@@ -100,12 +319,48 @@ function App() {
           <span>Schema<span className="lime">Drill</span></span>
         </a>
         <div className="nav-right">
-          {session ? (
-            <button type="button" onClick={() => authClient?.signOut().then(() => setSession(null))}>
-              Sign out
-            </button>
+          {authLoading ? (
+            <span className="auth-pending">Checking session...</span>
+          ) : session ? (
+            <div className="auth-group">
+              <div
+                className="user-chip"
+                title={secondaryEmail ? `${displayName} (${secondaryEmail})` : displayName}
+              >
+                {user?.image && !avatarBroken ? (
+                  <img
+                    className="user-avatar-img"
+                    src={user.image}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    onError={() => setAvatarBroken(true)}
+                  />
+                ) : (
+                  <span className="user-avatar" aria-hidden="true">{getUserInitial(user)}</span>
+                )}
+                <span className="user-meta">
+                  <strong className="user-name">{displayName}</strong>
+                  {secondaryEmail && <small className="user-email">{secondaryEmail}</small>}
+                </span>
+              </div>
+              <button
+                className="nav-signout-btn"
+                type="button"
+                onClick={handleSignOut}
+                disabled={signingOut}
+              >
+                {signingOut ? "Signing out..." : "Sign out"}
+              </button>
+            </div>
           ) : (
-            <button type="button" onClick={signIn}>Sign in with Google</button>
+            <button
+              className="nav-auth-btn"
+              type="button"
+              onClick={signIn}
+              disabled={signingIn}
+            >
+              {signingIn ? "Redirecting..." : "Sign in with Google"}
+            </button>
           )}
           <span className={`status ${apiOnline === false ? "offline" : ""}`}>
             <i /> {apiOnline === null ? "Checking API" : apiOnline ? "API online" : "API offline"}
@@ -115,6 +370,44 @@ function App() {
       </header>
 
       <main>
+        {(sessionExpired || authError) && (
+          <div className="auth-banner" role="alert">
+            <div className="auth-banner-copy">
+              <span className="auth-banner-label">
+                <i /> {sessionExpired ? "SESSION EXPIRED" : "AUTHENTICATION"}
+              </span>
+              <p>
+                {sessionExpired
+                  ? "Your session ended. Sign in again with Google to continue — your draft question will be kept."
+                  : authError}
+              </p>
+            </div>
+            <div className="auth-banner-actions">
+              {!session && authClient && (
+                <button
+                  className="banner-signin-btn"
+                  type="button"
+                  onClick={signIn}
+                  disabled={signingIn}
+                >
+                  {signingIn ? "Redirecting..." : "Sign in with Google"}
+                </button>
+              )}
+              <button
+                className="banner-dismiss-btn"
+                type="button"
+                onClick={() => {
+                  setSessionExpired(false);
+                  setAuthError(null);
+                }}
+                aria-label="Dismiss authentication notice"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         <section className="hero">
           <div className="eyebrow"><span /> NATURAL LANGUAGE TO SQL</div>
           <h1>Ask your database<br /><span>better questions.</span></h1>
@@ -125,8 +418,25 @@ function App() {
           <form className="query-panel" onSubmit={submitQuery}>
             <div className="panel-heading"><span><b>01</b> Ask your data</span><em>READ ONLY</em></div>
             <label htmlFor="dataset">Dataset</label>
-            <select id="dataset" value={dataset} onChange={(event) => setDataset(event.target.value)} disabled={!datasets.length}>
-              {datasets.length ? datasets.map((item) => <option value={item.id} key={item.id}>{item.label} — {item.description}</option>) : <option value="">No datasets available</option>}
+            <select
+              id="dataset"
+              value={dataset}
+              onChange={(event) => setDataset(event.target.value)}
+              disabled={!datasets.length}
+            >
+              {datasets.length ? (
+                datasets.map((item) => (
+                  <option value={item.id} key={item.id}>{item.label} — {item.description}</option>
+                ))
+              ) : (
+                <option value="">
+                  {!session
+                    ? "Sign in with Google to load datasets"
+                    : datasetsLoading
+                      ? "Loading datasets..."
+                      : "No datasets available"}
+                </option>
+              )}
             </select>
             <label htmlFor="question">What do you want to know?</label>
             <textarea id="question" value={question} onChange={(event) => setQuestion(event.target.value)}
@@ -134,12 +444,19 @@ function App() {
             <div className="suggestions"><span>Try an example</span>
               {(selectedDataset?.examples || []).map((example) => <button type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}
             </div>
-            <button className="run-button" type="submit" disabled={loading || !question.trim() || !session}>
+            <button className="run-button" type="submit" disabled={loading || !question.trim() || !session || !dataset}>
               {loading ? <><span className="spinner" /> Running query...</> : <>Run query <b>↗</b></>}
             </button>
             <p className="shortcut">Press <kbd>Ctrl</kbd><span>↵</span> or <kbd>⌘</kbd><span>↵</span> to run</p>
           </form>
-          <ResultsPanel loading={loading} result={result} error={error} />
+          <ResultsPanel
+            loading={loading}
+            result={result}
+            error={error}
+            sessionExpired={sessionExpired}
+            signingIn={signingIn}
+            onSignIn={signIn}
+          />
         </section>
       </main>
       <footer><span>SchemaDrill <b>·</b> Safe by design</span><span>Queries are bounded and read-only</span></footer>
@@ -147,8 +464,27 @@ function App() {
   );
 }
 
-function ResultsPanel({ loading, result, error }) {
+function ResultsPanel({ loading, result, error, sessionExpired, signingIn, onSignIn }) {
   if (loading) return <section className="answer-panel centered"><span className="loader" /><h2>Working on it...</h2><p>Generating and validating a read-only query.</p></section>;
+  if (sessionExpired && !result) {
+    return (
+      <section className="answer-panel centered error-state">
+        <span className="error-icon">!</span>
+        <h2>Session expired</h2>
+        <p>Sign in again with Google to load your datasets and run this query. Your draft question is saved.</p>
+        {authClient && (
+          <button
+            className="panel-action-btn"
+            type="button"
+            onClick={onSignIn}
+            disabled={signingIn}
+          >
+            {signingIn ? "Redirecting..." : "Sign in with Google"}
+          </button>
+        )}
+      </section>
+    );
+  }
   if (error) return <section className="answer-panel centered error-state"><span className="error-icon">!</span><h2>Couldn’t run that query</h2><p>{error.message}</p>{error.details && <details><summary>Technical details</summary><pre>{typeof error.details === "string" ? error.details : JSON.stringify(error.details, null, 2)}</pre></details>}</section>;
   if (!result) return <section className="answer-panel centered"><div className="empty-icon">⌁</div><h2>Your answer will appear here</h2><p>Ask a question to generate a query and explore your data.</p><div className="empty-line" /></section>;
   return <Result result={result} />;
@@ -184,7 +520,7 @@ function Result({ result }) {
     {rows.length ? <div className="table-wrap"><table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{columns.map((column) => <td key={column} className={row[column] === null ? "null" : ""}>{row[column] === null ? "NULL" : String(row[column])}</td>)}</tr>)}</tbody></table></div> : <div className="no-rows">The query completed successfully but returned no rows.</div>}
     <div className="sql-heading"><span className="block-label">GENERATED SQL</span><button onClick={copySql} disabled={!sql}>{copied ? "Copied" : "Copy SQL"}</button></div>
     <pre className="sql">{sql || "SQL was not returned by the API."}</pre>
-    <details open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}><summary><span className="block-label">EXECUTION DETAILS</span><span>{detailsOpen ? "⌃" : "⌄"}</span></summary><div className="details-grid"><span>Dataset<strong>chinook</strong></span><span>Attempts<strong>{result.attempts}</strong></span><span>Status<strong>{result.status}</strong></span></div></details>
+    <details open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}><summary><span className="block-label">EXECUTION DETAILS</span><span>{detailsOpen ? "⌃" : "⌄"}</span></summary><div className="details-grid"><span>Dataset<strong>{result.dataset || "chinook"}</strong></span><span>Attempts<strong>{result.attempts}</strong></span><span>Status<strong>{result.status}</strong></span></div></details>
   </section>;
 }
 

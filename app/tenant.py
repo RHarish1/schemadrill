@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 import psycopg
 
 from app.config import Settings, get_settings
+from app.models import AuthenticatedUser
 
 _SCRIPTS_DIRECTORY = Path(__file__).resolve().parent.parent / "scripts"
 _TENANT_SCHEMA = (_SCRIPTS_DIRECTORY / "tenant.sql").read_text(encoding="utf-8")
@@ -44,19 +45,34 @@ def _ensure_tenant_schema(database_url: str) -> None:
         connection.commit()
 
 
-def provision_user(user_id: str, settings: Settings | None = None) -> bool:
+def _normalize_optional_text(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def provision_user(
+    user_id: str,
+    settings: Settings | None = None,
+    *,
+    email: str | None = None,
+    display_name: str | None = None,
+) -> bool:
     settings = settings or get_settings()
+    clean_email = _normalize_optional_text(email)
+    clean_display_name = _normalize_optional_text(display_name)
     database_url = _provisioning_database_url(settings)
     _ensure_tenant_schema(database_url)
     with psycopg.connect(database_url) as connection:
         cursor = connection.execute(
             """
-            INSERT INTO public.users (user_id)
-            VALUES (%s)
+            INSERT INTO public.users (user_id, email, display_name)
+            VALUES (%s, %s, %s)
             ON CONFLICT (user_id) DO NOTHING
             RETURNING user_id
             """,
-            (user_id,),
+            (user_id, clean_email, clean_display_name),
         )
         is_new_user = cursor.fetchone() is not None
         if is_new_user:
@@ -74,8 +90,51 @@ def provision_user(user_id: str, settings: Settings | None = None) -> bool:
                     for dataset_id, label, schema_name in _DEFAULT_DATASETS
                 ],
             )
+        elif clean_email is not None or clean_display_name is not None:
+            connection.execute(
+                """
+                UPDATE public.users
+                SET
+                    email = COALESCE(%s, email),
+                    display_name = COALESCE(%s, display_name)
+                WHERE user_id = %s
+                  AND (
+                      (%s IS NOT NULL AND email IS DISTINCT FROM %s)
+                      OR (%s IS NOT NULL AND display_name IS DISTINCT FROM %s)
+                  )
+                """,
+                (
+                    clean_email,
+                    clean_display_name,
+                    user_id,
+                    clean_email,
+                    clean_email,
+                    clean_display_name,
+                    clean_display_name,
+                ),
+            )
         connection.commit()
     return is_new_user
+
+
+def get_user(user_id: str, settings: Settings | None = None) -> AuthenticatedUser | None:
+    settings = settings or get_settings()
+    with psycopg.connect(settings.database_url) as connection:
+        row = connection.execute(
+            """
+            SELECT user_id, email, display_name
+            FROM public.users
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return AuthenticatedUser(
+        user_id=row[0],
+        email=row[1],
+        display_name=row[2],
+    )
 
 
 def user_has_dataset(user_id: str, dataset_id: str, settings: Settings | None = None) -> bool:

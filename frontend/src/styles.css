@@ -11,8 +11,30 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .logo { display: flex; gap: 10px; align-items: center; color: #f2f7f6; text-decoration: none; font: 600 18px "Space Grotesk"; letter-spacing: -.05em; }
 .logo-mark { display: grid; width: 30px; height: 30px; place-items: center; color: #162014; background: #d8f36b; border-radius: 8px; font: 700 17px "Space Grotesk"; }
 .lime, h1 span { color: #d8f36b; }
-.nav-right { display: flex; align-items: center; gap: 25px; color: #849399; font: 12px "DM Mono"; }
+.nav-right { display: flex; align-items: center; gap: 20px; color: #849399; font: 12px "DM Mono"; }
 .nav-right a { color: #adb8ba; text-decoration: none; }
+.auth-pending { color: #78888d; font-size: 11px; }
+.auth-group { display: inline-flex; align-items: center; gap: 10px; }
+.user-chip { display: inline-flex; align-items: center; gap: 9px; padding: 5px 12px 5px 6px; border: 1px solid #26343a; border-radius: 999px; background: rgba(18, 26, 30, .9); }
+.user-avatar, .user-avatar-img { width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; }
+.user-avatar { display: grid; place-items: center; color: #d8f36b; background: rgba(216, 243, 107, .14); border: 1px solid rgba(216, 243, 107, .35); font: 600 11px "Space Grotesk"; }
+.user-avatar-img { object-fit: cover; border: 1px solid #2c3b41; }
+.user-meta { display: flex; flex-direction: column; line-height: 1.2; max-width: 185px; }
+.user-name, .user-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-name { color: #e5eded; font: 500 11px "DM Sans"; }
+.user-email { color: #79898f; font: 10px "DM Mono"; }
+.nav-auth-btn, .banner-signin-btn, .panel-action-btn { padding: 8px 13px; border: 1px solid rgba(216, 243, 107, .45); border-radius: 7px; color: #d8f36b; background: rgba(216, 243, 107, .08); font: 500 12px "DM Mono"; transition: background .15s, color .15s; }
+.nav-auth-btn:hover, .banner-signin-btn:hover, .panel-action-btn:hover { background: #d8f36b; color: #162014; }
+.nav-signout-btn, .banner-dismiss-btn { padding: 7px 11px; border: 1px solid #2c3b41; border-radius: 7px; color: #adb8ba; background: transparent; font: 11px "DM Mono"; transition: border-color .15s, color .15s; }
+.nav-signout-btn:hover { border-color: #ff9c8b; color: #ff9c8b; }
+.banner-dismiss-btn:hover { border-color: #879499; color: #edf2f2; }
+.nav-auth-btn:disabled, .nav-signout-btn:disabled, .banner-signin-btn:disabled, .panel-action-btn:disabled { cursor: not-allowed; opacity: .55; }
+.auth-banner { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 32px; padding: 14px 18px; border: 1px solid #6e453b; border-radius: 11px; background: rgba(38, 22, 20, .78); }
+.auth-banner-copy p { margin: 6px 0 0; color: #d8c8c4; font-size: 13px; line-height: 1.45; }
+.auth-banner-label { display: inline-flex; align-items: center; gap: 7px; color: #ff9c8b; font: 500 10px "DM Mono"; letter-spacing: .1em; }
+.auth-banner-label i { width: 6px; height: 6px; background: #ff9c8b; border-radius: 50%; box-shadow: 0 0 8px #ff9c8b; }
+.auth-banner-actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.panel-action-btn { margin: 18px auto 0; }
 .status i, .success-label i { display: inline-block; width: 7px; height: 7px; margin-right: 8px; background: #d8f36b; border-radius: 50%; box-shadow: 0 0 10px #d8f36b; }
 .status.offline i { background: #ff9c8b; box-shadow: 0 0 10px #ff9c8b; }
 main { padding: 80px 0 100px; }
@@ -80,5 +102,5 @@ summary .block-label { margin: 0; }
 footer { display: flex; justify-content: space-between; padding-bottom: 28px; color: #657379; font: 10px "DM Mono"; }
 footer b { margin: 0 7px; color: #d8f36b; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 760px) { .app-shell { width: min(100% - 30px, 1120px); } main { padding-top: 55px; } .workspace { grid-template-columns: 1fr; } .query-panel, .answer-panel { min-height: 0; } }
-@media (max-width: 480px) { .nav-right { gap: 10px; } .status { display: none; } .hero { margin-bottom: 42px; } h1 { font-size: 50px; } footer { gap: 15px; flex-direction: column; } .details-grid { gap: 15px; } }
+@media (max-width: 760px) { .app-shell { width: min(100% - 30px, 1120px); } main { padding-top: 55px; } .workspace { grid-template-columns: 1fr; } .query-panel, .answer-panel { min-height: 0; } .user-email { display: none; } .auth-banner { flex-direction: column; align-items: flex-start; } }
+@media (max-width: 480px) { .nav-right { gap: 10px; } .status, .user-meta { display: none; } .user-chip { padding: 4px; } .hero { margin-bottom: 42px; } h1 { font-size: 50px; } footer { gap: 15px; flex-direction: column; } .details-grid { gap: 15px; } }
