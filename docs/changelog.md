@@ -17,7 +17,8 @@ Derived from `git log` (2026-09-26 to 2026-11-08). Hashes are abbreviated.
 | 11-06 | **Authenticated default dataset provisioning** | `231e1cb` |
 | 11-07 | Readonly auth and tenant provisioning fix, wheel handling, issuer normalization, **Cloud Build CI/CD with live-eval deploy gate** | `7a13432`, `ffe92c9`, `1d34e0a`, `fb62b1d`, `6f4b804`, `b2a71bf`, `73d9a4e` |
 | 11-08 | **v0.1.1**: gitignore private self-notes (`notes/`, `AGENTS.md`, `GEMINI.md`) | `cc1c910` |
-| 11-08 | **v0.2.0**: **Google auth completion** — JWT email/display name capture and backfill, `GET /api/me`, signed-in identity chip, cross-tab sign-out, session-expiry refresh and draft preservation | this commit |
+| 11-08 | **v0.2.0**: **Google auth completion** — JWT email/display name capture and backfill, `GET /api/me`, signed-in identity chip, cross-tab sign-out, session-expiry refresh and draft preservation | `acf122d` |
+| 11-08 | **v0.2.1**: patch bump to retrigger GitHub dynamic CodeQL scan after upstream 504 timeout | this commit |
 
 ## Feature inventory
 
