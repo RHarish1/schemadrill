@@ -23,7 +23,8 @@ Derived from `git log` (2026-09-26 to 2026-11-10). Hashes are abbreviated.
 | 11-08 | **v0.2.3**: fix production `500` (`psycopg.errors.IndeterminateDatatype`) on user profile backfill for existing users | `faf0bfc` |
 | 11-10 | **Reliability**: unwrap provider retries, request-scoped logging, sanitized `429`/`503`/`500` error responses | `e9bb1c0` |
 | 11-10 | **v0.3.0**: **Execution Trace observability** — separate internal telemetry and sanitized public `execution_trace` API (including failed queries), plus collapsible React Execution Trace drawer | `54227fc` |
-| 11-10 | **v0.3.1**: **Read-only boundary hardening & trace detail breakdown** — full-AST rejection of mutation/DDL/locking/command nodes (including data-modifying CTEs, `SELECT ... INTO`, `FOR UPDATE`, `set_config`), `SELECT`-only `schemadrill_readonly` grants on tenant tables (`scripts/tenant.sql`), and `Show details` exposure of `top_k`, `fk_expansion`, independent validation check statuses (`read_only_policy`, `sql_syntax`, `dry_run`), and `execution_mode` | this commit |
+| 11-10 | **v0.3.1**: **Read-only boundary hardening & trace detail breakdown** — full-AST rejection of mutation/DDL/locking/command nodes (including data-modifying CTEs, `SELECT ... INTO`, `FOR UPDATE`, `set_config`), `SELECT`-only `schemadrill_readonly` grants on tenant tables (`scripts/tenant.sql`), and `Show details` exposure of `top_k`, `fk_expansion`, independent validation check statuses (`read_only_policy`, `sql_syntax`, `dry_run`), and `execution_mode` | `5ba478c` |
+| 11-10 | **v0.3.2**: add repo-local `schemadrill-workflow` agent skill (`.agents/skills/`) covering ADRs, SemVer sync, verification, and commit standards | this commit |
 
 ## Feature inventory
 
@@ -62,6 +63,6 @@ Derived from `git log` (2026-09-26 to 2026-11-10). Hashes are abbreviated.
 | Database | Read-only role lost its login/password, so 5 min `PoolTimeout` | Restore `LOGIN PASSWORD`/`ALTER ROLE` in `init.sql` | `7a13432` |
 | Database | Synthetic datasets unreadable by serving role | `GRANT USAGE/SELECT` in dataset init | `7a13432` |
 | Tenancy | 500 `InsufficientPrivilege` on `/api/datasets` and `/query` | Use `INGEST_DATABASE_URL` for provisioning when serving as read-only | `7a13432` |
-| Tenancy | 500 `psycopg.errors.IndeterminateDatatype` (`$4 IS NOT NULL`) on `/api/datasets` and `/api/me` for existing users | Replace untyped `%s IS NOT NULL` with explicit `%s::text` casts inside `COALESCE` / `IS DISTINCT FROM` | latest |
+| Tenancy | 500 `psycopg.errors.IndeterminateDatatype` (`$4 IS NOT NULL`) on `/api/datasets` and `/api/me` for existing users | Replace untyped `%s IS NOT NULL` with explicit `%s::text` casts inside `COALESCE` / `IS DISTINCT FROM` | `faf0bfc` |
 | Auth | JWT issuer mismatch when `/neondb/auth` suffix was configured | Accept configured issuer and normalized origin | `fb62b1d` |
 | Tenancy | Dataset id was globally unique | Composite PK `(dataset_id, user_id)` | `2bcea0a`, `231e1cb` |
