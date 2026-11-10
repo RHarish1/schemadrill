@@ -20,6 +20,26 @@ function stageIcon(status) {
   return "•";
 }
 
+function formatExecutionMode(mode) {
+  if (mode === "read_only_role_and_transaction") {
+    return "Read-only (PostgreSQL role + transaction)";
+  }
+  if (mode === "read_only_transaction") {
+    return "Read-only (transaction)";
+  }
+  if (mode === "read_only") {
+    return "Read-only";
+  }
+  return null;
+}
+
+function formatCheckStatus(status) {
+  if (status === "passed") return "Passed";
+  if (status === "failed") return "Failed";
+  if (status === "skipped") return "Skipped";
+  return null;
+}
+
 function getDefaultSubtitle(stage) {
   const details = stage.details || {};
   if (stage.status === "failed" && details.summary) {
@@ -45,6 +65,7 @@ export default function ExecutionTraceDrawer({ trace, dataset = null, defaultOpe
   const retrievedTables = Array.isArray(trace.retrieved_tables) ? trace.retrieved_tables : [];
   const retryReasons = Array.isArray(trace.retry_reasons) ? trace.retry_reasons : [];
   const retryCount = typeof trace.retry_count === "number" ? trace.retry_count : 0;
+  const executionModeLabel = formatExecutionMode(trace.execution_mode);
 
   return (
     <details
@@ -71,6 +92,10 @@ export default function ExecutionTraceDrawer({ trace, dataset = null, defaultOpe
             const defaultSubtitle = getDefaultSubtitle(stage);
             const showTableChips =
               showDetails && stage.name === "Schema retrieval" && retrievedTables.length > 0;
+            const showRetrievalMeta =
+              showDetails &&
+              stage.name === "Schema retrieval" &&
+              (typeof trace.top_k === "number" || typeof trace.fk_expansion === "boolean");
             const showModel =
               showDetails && stage.name === "SQL generation" && Boolean(details.model);
             const showValidationNote =
@@ -78,6 +103,14 @@ export default function ExecutionTraceDrawer({ trace, dataset = null, defaultOpe
               stage.name === "SQL validation" &&
               stage.status !== "failed" &&
               Boolean(details.summary);
+            const validationChecks =
+              showDetails && stage.name === "SQL validation"
+                ? [
+                    { label: "Read-only AST policy", value: formatCheckStatus(details.read_only_policy) },
+                    { label: "SQL syntax", value: formatCheckStatus(details.sql_syntax) },
+                    { label: "EXPLAIN dry-run", value: formatCheckStatus(details.dry_run) },
+                  ].filter((item) => item.value !== null)
+                : [];
             const showRowCount =
               showDetails &&
               stage.name === "Query execution" &&
@@ -113,12 +146,34 @@ export default function ExecutionTraceDrawer({ trace, dataset = null, defaultOpe
                   </div>
                 )}
 
+                {showRetrievalMeta && (
+                  <p className="trace-stage-extra">
+                    {typeof trace.top_k === "number" ? `Top-k: ${trace.top_k}` : "Full schema"}
+                    {typeof trace.fk_expansion === "boolean"
+                      ? ` · FK expansion: ${trace.fk_expansion ? "Enabled" : "Disabled"}`
+                      : ""}
+                  </p>
+                )}
+
                 {showModel && (
                   <p className="trace-stage-extra">Model: {String(details.model)}</p>
                 )}
 
                 {showValidationNote && (
                   <p className="trace-stage-extra">{String(details.summary)}</p>
+                )}
+
+                {validationChecks.length > 0 && (
+                  <div className="trace-checks" aria-label="Validation checks">
+                    {validationChecks.map((check) => (
+                      <span
+                        className={`trace-chip ${check.value === "Failed" ? "trace-chip--warn" : ""}`}
+                        key={check.label}
+                      >
+                        {check.label}: {check.value}
+                      </span>
+                    ))}
+                  </div>
                 )}
 
                 {showRowCount && (
@@ -150,6 +205,12 @@ export default function ExecutionTraceDrawer({ trace, dataset = null, defaultOpe
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+          {showDetails && executionModeLabel && (
+            <div className="trace-meta-row">
+              <span>Execution mode</span>
+              <strong>{executionModeLabel}</strong>
             </div>
           )}
           {showDetails && dataset && (

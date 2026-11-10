@@ -39,7 +39,7 @@ flowchart TD
 
 ### Phase 1: Foundation for tenancy
 - [ ] Control-plane tables: `connections`, `credentials`, `llm_keys`, `query_history`, `usage`.
-- [ ] Separate writer role for control-plane tables. Remove write grants from `schemadrill_readonly`.
+- [ ] Separate writer role (`schemadrill_app`) for control-plane tables (`scripts/tenant.sql` write grants removed from `schemadrill_readonly` in v0.3.1).
 - [ ] Move secrets to Secret Manager. Remove plain env reads in `cloudbuild.yaml`.
 - [ ] Per-request LLM credentials: `llm_client` and `pipeline` take `provider`, `model`, `api_key`.
 - [ ] Key `schema_embeddings` by `(user_id, connection_id)`.

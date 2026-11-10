@@ -32,6 +32,9 @@ export interface PublicStageTrace {
 export interface ExecutionTrace {
   stages: PublicStageTrace[];
   retrieved_tables: string[];
+  top_k?: number | null;
+  fk_expansion?: boolean | null;
+  execution_mode?: string;
   retry_count: number;
   retry_reasons?: string[];
   total_duration_ms: number;

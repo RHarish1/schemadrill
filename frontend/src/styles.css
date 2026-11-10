@@ -118,7 +118,7 @@ summary .block-label { margin: 0; }
 .trace-stage-note, .trace-stage-extra { margin: 4px 0 0 25px; color: #7f8e94; font-size: 12px; line-height: 1.45; }
 .trace-stage-note.is-error { color: #ff9c8b; }
 .trace-stage-extra { font: 11px/1.45 "DM Mono"; color: #9aa8ad; }
-.trace-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 7px 0 0 25px; }
+.trace-chips, .trace-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 7px 0 0 25px; }
 .trace-chip { padding: 3px 8px; border: 1px solid #2c3b41; border-radius: 5px; background: #152025; color: #c9d3d4; font: 10px "DM Mono"; }
 .trace-chip--warn { border-color: #6e453b; background: rgba(38, 22, 20, .7); color: #ff9c8b; }
 .trace-footer { display: flex; flex-direction: column; gap: 7px; padding-top: 12px; border-top: 1px solid #223036; font: 11px "DM Mono"; color: #7f8e94; }

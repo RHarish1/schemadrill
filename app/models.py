@@ -28,6 +28,9 @@ class PublicStageTrace(BaseModel):
 class ExecutionTraceResponse(BaseModel):
     stages: list[PublicStageTrace] = Field(default_factory=list)
     retrieved_tables: list[str] = Field(default_factory=list)
+    top_k: int | None = None
+    fk_expansion: bool | None = None
+    execution_mode: str = "read_only"
     retry_count: int = 0
     retry_reasons: list[str] = Field(default_factory=list)
     total_duration_ms: float = 0.0

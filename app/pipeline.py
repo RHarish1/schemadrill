@@ -4,6 +4,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Protocol
+from urllib.parse import urlparse
 
 from psycopg import Error as PsycopgError
 
@@ -228,11 +229,26 @@ def build_pipeline_stages(
                     dry_run_passed=False,
                     rejection_reason=guard_result.rejection_reason,
                 )
+                validation_checks = (
+                    {
+                        "summary": summary,
+                        "sql_syntax": "failed",
+                        "read_only_policy": "skipped",
+                        "dry_run": "skipped",
+                    }
+                    if kind == "parse_error"
+                    else {
+                        "summary": summary,
+                        "sql_syntax": "passed",
+                        "read_only_policy": "failed",
+                        "dry_run": "skipped",
+                    }
+                )
                 trace.record_stage(
                     "SQL validation",
                     status="failed",
                     duration_ms=validation_ms,
-                    details={"summary": summary},
+                    details=validation_checks,
                 )
             raise _RetryStage(kind, guard_result.user_facing_message or "Security policy rejection")
         state.last_sql = guard_result.sql
@@ -259,7 +275,12 @@ def build_pipeline_stages(
                     "SQL validation",
                     status="failed",
                     duration_ms=validation_ms,
-                    details={"summary": "Generated SQL failed database dry-run validation."},
+                    details={
+                        "summary": "Generated SQL failed database dry-run validation.",
+                        "sql_syntax": "passed",
+                        "read_only_policy": "passed",
+                        "dry_run": "failed",
+                    },
                 )
             raise _RetryStage("dry_run_error", str(error).splitlines()[0]) from error
 
@@ -282,7 +303,12 @@ def build_pipeline_stages(
                 "SQL validation",
                 status="passed",
                 duration_ms=validation_ms,
-                details={"summary": summary},
+                details={
+                    "summary": summary,
+                    "sql_syntax": "passed",
+                    "read_only_policy": "passed",
+                    "dry_run": "passed",
+                },
             )
         return state
 
@@ -366,6 +392,13 @@ def run_pipeline(
     internal_trace = trace or InternalTrace(request_id=get_request_id(), db=db)
     internal_trace.started_at = time.perf_counter()
     internal_trace.model = settings.model_name
+    internal_trace.top_k = None if settings.full_schema_retrieval else settings.top_k
+    internal_trace.fk_expansion = settings.enable_fk_expansion
+    internal_trace.execution_mode = (
+        "read_only_role_and_transaction"
+        if urlparse(settings.database_url).username == "schemadrill_readonly"
+        else "read_only_transaction"
+    )
     trace_token = set_current_trace(internal_trace)
 
     state = RetryState(question=question, attempt=1)

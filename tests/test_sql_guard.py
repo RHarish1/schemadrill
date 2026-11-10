@@ -22,6 +22,16 @@ ALLOWED = {"public.customers", "public.orders"}
         "DROP TABLE public.customers",
         "ALTER TABLE public.customers ADD COLUMN x integer",
         "SELECT * FROM public.customers; DROP TABLE public.customers",
+        "WITH d AS (DELETE FROM public.customers RETURNING *) SELECT * FROM d",
+        "WITH u AS (UPDATE public.customers SET name = 'A' RETURNING *) SELECT * FROM u",
+        "WITH i AS (INSERT INTO public.customers VALUES (1, 'A') RETURNING *) SELECT * FROM i",
+        "SELECT * INTO public.orders FROM public.customers",
+        "SELECT * FROM public.customers FOR UPDATE",
+        "MERGE INTO public.customers USING public.orders ON true WHEN MATCHED THEN DELETE",
+        "TRUNCATE TABLE public.customers",
+        "COPY public.customers TO '/tmp/out.csv'",
+        "CALL some_proc()",
+        "SET ROLE postgres",
     ],
 )
 def test_non_select_statements_are_rejected(sql):
@@ -67,6 +77,7 @@ def test_unauthorized_tables_are_rejected_at_any_ast_depth(sql):
             "SELECT * FROM dblink('host=internal-db dbname=secret', 'SELECT 1') AS t(id integer)",
             "dblink",
         ),
+        ("SELECT set_config('transaction_read_only', 'off', true)", "set_config"),
     ],
 )
 def test_blocked_postgres_capabilities_are_rejected(sql, function_name):
@@ -85,11 +96,16 @@ def test_legitimate_queries_and_cte_are_allowed():
         ALLOWED,
     )
     cte = guard_sql("WITH recent AS (SELECT * FROM public.orders) SELECT * FROM recent", ALLOWED)
+    intersect = guard_sql(
+        "SELECT id FROM public.customers INTERSECT SELECT customer_id FROM public.orders",
+        ALLOWED,
+    )
 
     assert simple.allowed and simple.limit_injected
     assert join.allowed
     assert cte.allowed
     assert cte.referenced_tables == ["public.orders"]
+    assert intersect.allowed
 
 
 def test_blocked_function_string_literal_is_not_a_function_call():

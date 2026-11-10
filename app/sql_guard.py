@@ -28,7 +28,30 @@ BLOCKED_FUNCTIONS = {
     "dblink_exec",
     "dblink_send_query",
     "dblink_get_result",
+    "set_config",
 }
+
+# Reject mutation, DDL, locking, and session/command AST nodes anywhere in the tree
+# (for example, inside data-modifying CTEs like WITH d AS (DELETE ... RETURNING *) SELECT ...).
+_DISALLOWED_MUTATION_NODES = (
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Merge,
+    exp.Create,
+    exp.Drop,
+    exp.Alter,
+    exp.TruncateTable,
+    exp.Copy,
+    exp.Grant,
+    exp.Command,
+    exp.Into,
+    exp.Lock,
+    exp.Set,
+    exp.Transaction,
+    exp.Commit,
+    exp.Rollback,
+)
 
 
 def default_guard_config(max_limit: int = 1000) -> SQLGuardConfig:
@@ -66,9 +89,16 @@ def _blocked_functions(statement: exp.Expression, blocked: Iterable[str]) -> lis
 
 
 def _statement_type(statement: exp.Expression) -> str:
-    if isinstance(statement, (exp.Select, exp.Union)):
+    if isinstance(statement, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
         return "SELECT"
     return type(statement).__name__.upper()
+
+
+def _disallowed_mutation_operation(statement: exp.Expression) -> str | None:
+    for node in statement.walk():
+        if isinstance(node, _DISALLOWED_MUTATION_NODES):
+            return type(node).__name__.upper()
+    return None
 
 
 def _limit_value(statement: exp.Expression) -> int | None:
@@ -118,6 +148,16 @@ def guard_sql(
             referenced_tables=tables,
             blocked_functions=blocked,
             rejection_reason="Only SELECT statements are allowed",
+            user_facing_message=SECURITY_REJECTED_MESSAGE,
+        )
+    disallowed_op = _disallowed_mutation_operation(statement)
+    if disallowed_op is not None:
+        return SQLGuardResult(
+            allowed=False,
+            statement_type=disallowed_op,
+            referenced_tables=tables,
+            blocked_functions=blocked,
+            rejection_reason=f"Disallowed SQL operation: {disallowed_op}",
             user_facing_message=SECURITY_REJECTED_MESSAGE,
         )
     if blocked:

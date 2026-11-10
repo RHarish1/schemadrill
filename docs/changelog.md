@@ -22,14 +22,15 @@ Derived from `git log` (2026-09-26 to 2026-11-10). Hashes are abbreviated.
 | 11-08 | **v0.2.2**: add committed `.github/workflows/codeql.yml` (`v4.39.1`, Python + JS/TS + Actions) to use runner-cached CodeQL `2.27.3` | `88dacf0` |
 | 11-08 | **v0.2.3**: fix production `500` (`psycopg.errors.IndeterminateDatatype`) on user profile backfill for existing users | `faf0bfc` |
 | 11-10 | **Reliability**: unwrap provider retries, request-scoped logging, sanitized `429`/`503`/`500` error responses | `e9bb1c0` |
-| 11-10 | **v0.3.0**: **Execution Trace observability** — separate internal telemetry and sanitized public `execution_trace` API (including failed queries), plus collapsible React Execution Trace drawer | this commit |
+| 11-10 | **v0.3.0**: **Execution Trace observability** — separate internal telemetry and sanitized public `execution_trace` API (including failed queries), plus collapsible React Execution Trace drawer | `54227fc` |
+| 11-10 | **v0.3.1**: **Read-only boundary hardening & trace detail breakdown** — full-AST rejection of mutation/DDL/locking/command nodes (including data-modifying CTEs, `SELECT ... INTO`, `FOR UPDATE`, `set_config`), `SELECT`-only `schemadrill_readonly` grants on tenant tables (`scripts/tenant.sql`), and `Show details` exposure of `top_k`, `fk_expansion`, independent validation check statuses (`read_only_policy`, `sql_syntax`, `dry_run`), and `execution_mode` | this commit |
 
 ## Feature inventory
 
 - **Query API** (`POST /query`), datasets API (`/api/datasets`), user profile API (`GET /api/me`), metrics, public `/health`.
 - **Retrieval**: pgvector HNSW over per-table DDL, optional FK expansion, full-schema baseline, pluggable provider interface.
 - **Generation**: Gemini via Instructor, structured `SqlResponse`, stateless bounded self-correction.
-- **Safety**: AST SQL guard (24 adversarial tests), `EXPLAIN` gate, read-only transaction and role, row cap.
+- **Safety**: Full-AST SQL guard (35 adversarial tests, rejecting nested mutations/CTEs, `SELECT ... INTO`, `FOR UPDATE`, and `set_config`), `EXPLAIN` gate, read-only transaction and `SELECT`-only serving role, row cap.
 - **Reliability**: Redis rate limit per user, concurrency admission, provider backoff and timeouts.
 - **Auth and tenancy**: Neon Auth (Google provider) JWT verification, user profile capture/backfill (`email`, `display_name`), per-user dataset registry, idempotent provisioning.
 - **Frontend**: React/Vite SPA, dataset dropdown, example questions, API status, signed-in user identity chip, cross-tab sign-out, 401 token refresh, session-expiry prompt with OAuth draft preservation.

@@ -37,7 +37,7 @@ def main() -> None:
         "--config",
         action="append",
         metavar="JSON",
-        help=("Configuration JSON; may be repeated " '(for example \'{"name":"retry",...}\')'),
+        help=('Configuration JSON; may be repeated (for example \'{"name":"retry",...}\')'),
     )
     args = parser.parse_args()
     configs = [json.loads(value) for value in args.config] if args.config else None

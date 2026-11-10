@@ -21,5 +21,7 @@ ALTER TABLE public.user_datasets
 CREATE INDEX IF NOT EXISTS user_datasets_user_id_idx
   ON public.user_datasets(user_id);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.users, public.user_datasets
+REVOKE INSERT, UPDATE, DELETE ON public.users, public.user_datasets
+  FROM schemadrill_readonly;
+GRANT SELECT ON public.users, public.user_datasets
   TO schemadrill_readonly;

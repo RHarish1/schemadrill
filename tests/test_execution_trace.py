@@ -155,8 +155,14 @@ def test_pipeline_returns_sanitized_execution_trace_and_logs_internal_telemetry(
         "model": "gemini-3.1-flash-lite",
     }
     assert "summary" in trace.stages[2].details
+    assert trace.stages[2].details["sql_syntax"] == "passed"
+    assert trace.stages[2].details["read_only_policy"] == "passed"
+    assert trace.stages[2].details["dry_run"] == "passed"
     assert trace.stages[3].details == {"rows_returned": 2}
     assert trace.retrieved_tables == ["artist", "album"]
+    assert trace.top_k == 3
+    assert trace.fk_expansion is False
+    assert trace.execution_mode == "read_only_transaction"
     assert trace.retry_count == 0
     assert trace.retry_reasons == []
     assert trace.total_duration_ms >= 0
@@ -366,3 +372,49 @@ def test_query_endpoint_returns_execution_trace_on_internal_error_without_leakin
     assert body["execution_trace"]["stages"][0]["status"] == "completed"
     assert body["execution_trace"]["stages"][1]["status"] == "failed"
     assert body["execution_trace"]["stages"][1]["details"]["summary"] == "SQL generation failed."
+
+
+def test_execution_trace_reports_independent_validation_checks_and_readonly_role(monkeypatch):
+    monkeypatch.setattr("app.pipeline.readonly_connection", _fake_connection)
+    monkeypatch.setattr("app.pipeline.dry_run", lambda connection, sql: None)
+    monkeypatch.setattr("app.pipeline.execute", lambda connection, sql, max_rows: _FakeDataFrame())
+
+    guard_failed = run_pipeline(
+        "Delete artists",
+        "chinook",
+        settings=_settings(
+            max_retries=1,
+            database_url="postgresql://schemadrill_readonly:secret@db.internal:5432/schemadrill",
+        ),
+        retrieve=lambda q, db, k: [
+            DDLBlock(schema_name=db, table_name="artist", ddl_text="CREATE TABLE artist;")
+        ],
+        generate_sql=lambda messages: SqlResponse(
+            sql="WITH d AS (DELETE FROM artist RETURNING *) SELECT * FROM d"
+        ),
+    )
+    assert guard_failed.status == "failed"
+    assert guard_failed.execution_trace is not None
+    assert guard_failed.execution_trace.execution_mode == "read_only_role_and_transaction"
+    assert guard_failed.execution_trace.stages[2].details["sql_syntax"] == "passed"
+    assert guard_failed.execution_trace.stages[2].details["read_only_policy"] == "failed"
+    assert guard_failed.execution_trace.stages[2].details["dry_run"] == "skipped"
+
+    def fail_dry_run(connection, sql):
+        raise PsycopgError("column missing")
+
+    monkeypatch.setattr("app.pipeline.dry_run", fail_dry_run)
+    dry_run_failed = run_pipeline(
+        "List artists",
+        "chinook",
+        settings=_settings(max_retries=1),
+        retrieve=lambda q, db, k: [
+            DDLBlock(schema_name=db, table_name="artist", ddl_text="CREATE TABLE artist;")
+        ],
+        generate_sql=lambda messages: SqlResponse(sql="SELECT bad_col FROM artist"),
+    )
+    assert dry_run_failed.status == "failed"
+    assert dry_run_failed.execution_trace is not None
+    assert dry_run_failed.execution_trace.stages[2].details["sql_syntax"] == "passed"
+    assert dry_run_failed.execution_trace.stages[2].details["read_only_policy"] == "passed"
+    assert dry_run_failed.execution_trace.stages[2].details["dry_run"] == "failed"

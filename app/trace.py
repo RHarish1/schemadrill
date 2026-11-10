@@ -22,7 +22,7 @@ _CURRENT_TRACE_VAR: ContextVar[InternalTrace | None] = ContextVar("execution_tra
 _PUBLIC_STAGE_DETAIL_ALLOWLIST: dict[str, frozenset[str]] = {
     "Schema retrieval": frozenset({"tables_identified", "summary"}),
     "SQL generation": frozenset({"provider", "model", "summary"}),
-    "SQL validation": frozenset({"summary"}),
+    "SQL validation": frozenset({"summary", "sql_syntax", "read_only_policy", "dry_run"}),
     "Query execution": frozenset({"rows_returned", "summary"}),
 }
 
@@ -75,6 +75,9 @@ class InternalTrace:
     retrieved_tables: list[str] = field(default_factory=list)
     similarity_scores: list[dict[str, object]] = field(default_factory=list)
     fk_added_count: int = 0
+    top_k: int | None = None
+    fk_expansion: bool | None = None
+    execution_mode: str = "read_only"
 
     # Prompting telemetry
     prompt_construction_ms: float = 0.0
@@ -324,6 +327,9 @@ def build_public_execution_trace(
         return ExecutionTraceResponse(
             stages=public_stages,
             retrieved_tables=list(trace.retrieved_tables),
+            top_k=trace.top_k,
+            fk_expansion=trace.fk_expansion,
+            execution_mode=trace.execution_mode,
             retry_count=trace.pipeline_retries + trace.provider_retries,
             retry_reasons=retry_reasons,
             total_duration_ms=round(total_ms, 2),

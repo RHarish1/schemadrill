@@ -129,8 +129,8 @@ Two DB roles: `schemadrill_readonly` (serving) and `schemadrill_admin` (ingestio
 | 3 | **Retrieve table DDL, not full schema**; optional one-hop FK expansion and a full-schema baseline | Cuts prompt tokens and is ablatable | FK expansion off by default; recall depends on `top_k=3` |
 | 4 | **Stateless retry** (`RetryState` rebuilds the prompt each attempt, keeps only latest SQL/error) | The original loop accumulated messages, so token cost grew per retry | Model does not see older failures |
 | 5 | **Pipeline as `RetryState -> RetryState` stages**, validated each boundary | Isolated, testable stages; retrieval fixed across retries | Run-level DataFrame lives in a side context |
-| 6 | **Deterministic AST SQL guard** (sqlglot) before `EXPLAIN` | No LLM in the security path. Rejects non-SELECT, multi-statement, out-of-scope tables, dangerous functions, unbounded LIMIT | Generic error messages hide restricted names |
-| 7 | **Defense in depth for DB access**: guard + read-only transaction + read-only role + row cap (`max+1`) | A single bypass should not mean data loss | Role also needs write grants on tenant tables (see Known Gaps) |
+| 6 | **Deterministic AST SQL guard** (sqlglot) before `EXPLAIN` | No LLM in the security path. Rejects non-SELECT, multi-statement, nested mutation/DDL/locking/command AST nodes (such as data-modifying CTEs, `SELECT ... INTO`, `FOR UPDATE`), out-of-scope tables, dangerous functions (including `set_config`), unbounded LIMIT | Generic error messages hide restricted names |
+| 7 | **Defense in depth for DB access**: full-AST guard + `EXPLAIN` dry-run + `SET TRANSACTION READ ONLY` + `SELECT`-only serving role + row cap (`max+1`) | A single bypass should not mean data loss; future write support will remain gated behind explicit user confirmation | Serving deployments using `schemadrill_readonly` must configure `INGEST_DATABASE_URL` for `provision_user()` writes |
 | 8 | **Result-set accuracy as the primary metric**, AST similarity diagnostic only | AST/"executed OK" misreport correctness. Multiset comparison keeps duplicates | Must be validated against the official BIRD/Spider scorer before publishing numbers |
 | 9 | **`eval/` (implementation) vs `evaluation/` (dataset-facing)** | Fast deterministic Chinook CI vs opt-in BIRD | Two namespaces to maintain |
 | 10 | **Gold-as-generated CI smoke** + live Gemini gate at deploy | PR CI needs no secrets. Deploy is gated on real model quality | Deploy gate depends on live Gemini availability |
@@ -147,7 +147,7 @@ Two DB roles: `schemadrill_readonly` (serving) and `schemadrill_admin` (ingestio
 ## 7. Known gaps and risks (honest list)
 
 - **Tenant isolation is by dataset ACL, not data isolation.** All users share the same physical `chinook`, `ecommerce`, and other schemas. `user_datasets` only controls who may query which `schema_name`. That is fine for read-only demo data but not for user-owned data.
-- `schemadrill_readonly` is granted `INSERT/UPDATE/DELETE` on `users` and `user_datasets` (`scripts/tenant.sql`). The SQL guard and read-only transaction mitigate this, but a dedicated writer role is cleaner.
+- `schemadrill_readonly` is restricted to `SELECT` on `users` and `user_datasets` (`scripts/tenant.sql`), so `provision_user()` requires `INGEST_DATABASE_URL` (or an owner/writer `DATABASE_URL`) until a dedicated control-plane writer role (`schemadrill_app`) is added.
 - The Gemini key is **server-owned**: you pay for all usage (the motivation for BYOK).
 - Duplicate commits from a rebase (e.g. `c88289a`/`a3870bc`) exist in history. Cosmetic only.
 
