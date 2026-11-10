@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 import jwt
 from fastapi import HTTPException, Request
 
-from app.config import get_settings
+from app.config import get_request_id, get_settings
 from app.models import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
@@ -73,14 +73,18 @@ def current_user(request: Request) -> AuthenticatedUser:
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail="Authentication is not configured") from error
     except jwt.ExpiredSignatureError as error:
-        logger.info("authentication_token_expired")
+        logger.info("authentication_token_expired request_id=%s", get_request_id())
         raise HTTPException(
             status_code=401,
             detail="Authentication token expired",
             headers=_WWW_AUTHENTICATE_BEARER,
         ) from error
     except (jwt.PyJWTError, json.JSONDecodeError, OSError) as error:
-        logger.warning("authentication_token_rejected error_type=%s", type(error).__name__)
+        logger.warning(
+            "authentication_token_rejected request_id=%s error_type=%s",
+            get_request_id(),
+            type(error).__name__,
+        )
         raise HTTPException(
             status_code=401,
             detail="Invalid authentication token",

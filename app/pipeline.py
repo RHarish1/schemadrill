@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -5,15 +6,18 @@ from typing import Protocol
 
 from psycopg import Error as PsycopgError
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_request_id, get_settings
 from app.db import readonly_connection
 from app.executor import dry_run, execute
 from app.instrumentation import PipelineTelemetry
 from app.llm_client import generate
 from app.models import QueryResult, RetrievalResult, RetryState, RowCapExceeded, SqlResponse
 from app.prompting import feedback, messages_for_retry
+from app.reliability import sanitize_log_detail
 from app.retrieval import get_retrieval_provider
 from app.sql_guard import default_guard_config, guard_sql
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineStage(Protocol):
@@ -141,7 +145,21 @@ def build_pipeline_stages(
         except RowCapExceeded as error:
             raise _RetryStage("row_cap", str(error)) from error
         except PsycopgError as error:
-            raise _TerminalStage(str(error).splitlines()[0]) from error
+            detail = sanitize_log_detail(str(error)) or type(error).__name__
+            logger.warning(
+                "pipeline_execution_failed request_id=%s db=%s attempt=%d error_type=%s detail=%r",
+                get_request_id(),
+                db,
+                state.attempt,
+                type(error).__name__,
+                detail,
+            )
+            user_message = (
+                "The database query took too long to execute."
+                if "statement timeout" in detail.lower()
+                else "Query execution failed."
+            )
+            raise _TerminalStage(user_message) from error
         return state
 
     return [retrieval_stage, generation_stage, gate_stage, execute_stage]
@@ -191,6 +209,14 @@ def run_pipeline(
                         state = RetryState.model_validate(stage(RetryState.model_validate(state)))
             except _RetryStage as error:
                 state.last_error = error.detail
+                logger.info(
+                    "pipeline_stage_retry request_id=%s db=%s attempt=%d kind=%s detail=%r",
+                    get_request_id(),
+                    db,
+                    attempt,
+                    error.kind,
+                    sanitize_log_detail(error.detail),
+                )
                 if telemetry:
                     telemetry.spans.append(
                         {
@@ -226,6 +252,13 @@ def run_pipeline(
                 else _null_span()
             ):
                 table_markdown = dataframe.to_markdown(index=False)
+            logger.info(
+                "pipeline_completed request_id=%s db=%s status=success attempts=%d rows=%d",
+                get_request_id(),
+                db,
+                attempt,
+                len(rows),
+            )
             return QueryResult(
                 status="success",
                 sql=state.last_sql,
@@ -235,6 +268,13 @@ def run_pipeline(
                 attempts=attempt,
             )
 
+    logger.warning(
+        "pipeline_completed request_id=%s db=%s status=failed attempts=%d detail=%r",
+        get_request_id(),
+        db,
+        effective_attempt_budget,
+        sanitize_log_detail(state.last_error),
+    )
     return QueryResult(
         status="failed",
         sql=state.last_sql,

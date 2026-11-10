@@ -1,14 +1,29 @@
 import logging
+import time
+from functools import lru_cache
 
 import instructor
 from google.genai import types
 
-from app.config import get_settings
+from app.config import get_request_id, get_settings
 from app.models import SqlResponse
 from app.reliability import ReliabilityMetrics, RetryPolicy, call_with_provider_retry_sync
 
 logger = logging.getLogger(__name__)
 provider_metrics = ReliabilityMetrics()
+
+
+@lru_cache(maxsize=4)
+def _get_instructor_client(model_name: str, api_key: str, timeout_ms: int):
+    return instructor.from_provider(
+        f"google/{model_name}",
+        api_key=api_key,
+        mode=instructor.Mode.GENAI_TOOLS,
+        http_options=types.HttpOptions(
+            timeout=timeout_ms,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        ),
+    )
 
 
 def count_prompt_tokens(messages: list[dict[str, str]]) -> int:
@@ -24,27 +39,24 @@ def generate(messages: list[dict[str, str]]) -> SqlResponse:
     settings = get_settings()
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
+    request_id = get_request_id()
     logger.info(
-        "gemini_request model=%s message_count=%d",
+        "gemini_request request_id=%s model=%s message_count=%d",
+        request_id,
         settings.model_name,
         len(messages),
     )
 
+    timeout_ms = int(settings.provider_timeout_seconds * 1000)
+
     def request() -> SqlResponse:
-        client = instructor.from_provider(
-            f"google/{settings.model_name}",
-            api_key=settings.gemini_api_key,
-            mode=instructor.Mode.GENAI_TOOLS,
-            http_options=types.HttpOptions(
-                timeout=int(settings.provider_timeout_seconds * 1000),
-                retry_options=types.HttpRetryOptions(attempts=1),
-            ),
-        )
+        client = _get_instructor_client(settings.model_name, settings.gemini_api_key, timeout_ms)
         return client.create(
             messages=messages,
             response_model=SqlResponse,
         )
 
+    started = time.perf_counter()
     response = call_with_provider_retry_sync(
         request,
         RetryPolicy(
@@ -55,5 +67,11 @@ def generate(messages: list[dict[str, str]]) -> SqlResponse:
         ),
         metrics=provider_metrics,
     )
-    logger.info("gemini_response model=%s", settings.model_name)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "gemini_response request_id=%s model=%s duration_ms=%.0f",
+        request_id,
+        settings.model_name,
+        elapsed_ms,
+    )
     return response

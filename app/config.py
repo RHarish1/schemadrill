@@ -1,7 +1,22 @@
 import logging
+from contextvars import ContextVar
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REQUEST_ID_VAR: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+def get_request_id() -> str:
+    return _REQUEST_ID_VAR.get()
+
+
+def set_request_id(request_id: str):
+    return _REQUEST_ID_VAR.set(request_id)
+
+
+def reset_request_id(token) -> None:
+    _REQUEST_ID_VAR.reset(token)
 
 
 class Settings(BaseSettings):
