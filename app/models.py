@@ -18,6 +18,21 @@ class QueryRequest(BaseModel):
     db: str = Field(min_length=1, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+class PublicStageTrace(BaseModel):
+    name: str
+    status: Literal["pending", "completed", "passed", "failed"]
+    duration_ms: float
+    details: dict[str, object] = Field(default_factory=dict)
+
+
+class ExecutionTraceResponse(BaseModel):
+    stages: list[PublicStageTrace] = Field(default_factory=list)
+    retrieved_tables: list[str] = Field(default_factory=list)
+    retry_count: int = 0
+    retry_reasons: list[str] = Field(default_factory=list)
+    total_duration_ms: float = 0.0
+
+
 class QueryResult(BaseModel):
     status: Literal["success", "failed"]
     sql: str | None = None
@@ -26,6 +41,7 @@ class QueryResult(BaseModel):
     rows: list[dict[str, object]] = Field(default_factory=list)
     attempts: int
     reason: str | None = None
+    execution_trace: ExecutionTraceResponse | None = None
 
 
 class SQLGuardConfig(BaseModel):

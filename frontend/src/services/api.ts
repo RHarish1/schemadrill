@@ -1,5 +1,6 @@
 import type {
   DatasetCatalogResponse,
+  ExecutionTrace,
   QueryRequest,
   QueryResult,
   UserProfile,
@@ -15,6 +16,7 @@ class ApiRequestError extends Error {
     message: string,
     public readonly technicalDetails?: string,
     public readonly status?: number,
+    public readonly executionTrace?: ExecutionTrace,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -71,7 +73,15 @@ async function request<T>(path: string, init?: RequestInit, includeAuth = true):
         payload && typeof payload === "object" && "detail" in payload
           ? String(payload.detail)
           : `Request failed with status ${response.status}.`;
-      throw new ApiRequestError(detail, JSON.stringify(payload), response.status);
+      const executionTrace =
+        payload &&
+        typeof payload === "object" &&
+        "execution_trace" in payload &&
+        payload.execution_trace &&
+        typeof payload.execution_trace === "object"
+          ? (payload.execution_trace as ExecutionTrace)
+          : undefined;
+      throw new ApiRequestError(detail, JSON.stringify(payload), response.status, executionTrace);
     }
     return payload as T;
   } catch (error) {

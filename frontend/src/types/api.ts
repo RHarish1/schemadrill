@@ -20,6 +20,23 @@ export interface UserProfile {
   display_name: string | null;
 }
 
+export type StageStatus = "pending" | "completed" | "passed" | "failed";
+
+export interface PublicStageTrace {
+  name: string;
+  status: StageStatus;
+  duration_ms: number;
+  details?: Record<string, unknown>;
+}
+
+export interface ExecutionTrace {
+  stages: PublicStageTrace[];
+  retrieved_tables: string[];
+  retry_count: number;
+  retry_reasons?: string[];
+  total_duration_ms: number;
+}
+
 export interface QueryResult {
   status: "success" | "failed";
   sql: string | null;
@@ -28,8 +45,10 @@ export interface QueryResult {
   rows: Array<Record<string, unknown>>;
   attempts: number;
   reason: string | null;
+  execution_trace?: ExecutionTrace | null;
 }
 
 export interface ApiError {
   detail?: string;
+  execution_trace?: ExecutionTrace | null;
 }

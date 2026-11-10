@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import Callable
 from typing import Protocol
 
@@ -9,6 +10,7 @@ from app.db import readonly_connection
 from app.embedding import embed_query
 from app.models import DDLBlock, RetrievalResult
 from app.schema import table_ddl
+from app.trace import get_current_trace
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +74,9 @@ def retrieve_schema(question: str, db: str, top_k: int) -> list[DDLBlock]:
 
 
 def _retrieve_pgvector(question: str, db: str, top_k: int) -> list[DDLBlock]:
+    embed_started = time.perf_counter()
     query_vector = embed_query(question)
+    embedding_duration_ms = (time.perf_counter() - embed_started) * 1000
     query = """
         SELECT schema_name, table_name, ddl_text,
                embedding <=> %s::vector AS cosine_distance
@@ -86,20 +90,25 @@ def _retrieve_pgvector(question: str, db: str, top_k: int) -> list[DDLBlock]:
             cursor.execute(query, (query_vector, db, query_vector, top_k))
             rows = cursor.fetchall()
 
+    similarity_scores = [
+        {
+            "schema_name": row["schema_name"],
+            "table_name": row["table_name"],
+            "cosine_distance": float(row["cosine_distance"]),
+            "cosine_similarity": 1.0 - float(row["cosine_distance"]),
+        }
+        for row in rows
+    ]
+    trace = get_current_trace()
+    if trace is not None:
+        trace.record_embedding(embedding_duration_ms, similarity_scores)
+
     logger.info(
         "vector_similarity_results db=%s question=%r top_k=%d results=%s",
         db,
         question,
         top_k,
-        [
-            {
-                "schema_name": row["schema_name"],
-                "table_name": row["table_name"],
-                "cosine_distance": float(row["cosine_distance"]),
-                "cosine_similarity": 1.0 - float(row["cosine_distance"]),
-            }
-            for row in rows
-        ],
+        similarity_scores,
     )
     return [DDLBlock(**row) for row in rows]
 

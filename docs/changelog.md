@@ -1,6 +1,6 @@
 # Shipped Features and Bugs Solved
 
-Derived from `git log` (2026-09-26 to 2026-11-08). Hashes are abbreviated.
+Derived from `git log` (2026-09-26 to 2026-11-10). Hashes are abbreviated.
 
 ## Timeline of shipped features
 
@@ -20,7 +20,9 @@ Derived from `git log` (2026-09-26 to 2026-11-08). Hashes are abbreviated.
 | 11-08 | **v0.2.0**: **Google auth completion** — JWT email/display name capture and backfill, `GET /api/me`, signed-in identity chip, cross-tab sign-out, session-expiry refresh and draft preservation | `acf122d` |
 | 11-08 | **v0.2.1**: patch bump to retrigger GitHub dynamic CodeQL scan after upstream 504 timeout | `92d3353` |
 | 11-08 | **v0.2.2**: add committed `.github/workflows/codeql.yml` (`v4.39.1`, Python + JS/TS + Actions) to use runner-cached CodeQL `2.27.3` | `88dacf0` |
-| 11-08 | **v0.2.3**: fix production `500` (`psycopg.errors.IndeterminateDatatype`) on user profile backfill for existing users | this commit |
+| 11-08 | **v0.2.3**: fix production `500` (`psycopg.errors.IndeterminateDatatype`) on user profile backfill for existing users | `faf0bfc` |
+| 11-10 | **Reliability**: unwrap provider retries, request-scoped logging, sanitized `429`/`503`/`500` error responses | `e9bb1c0` |
+| 11-10 | **v0.3.0**: **Execution Trace observability** — separate internal telemetry and sanitized public `execution_trace` API (including failed queries), plus collapsible React Execution Trace drawer | this commit |
 
 ## Feature inventory
 

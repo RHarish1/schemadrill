@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -15,7 +16,7 @@ from app.config import get_request_id, get_settings, reset_request_id, set_reque
 from app.db import close_pool
 from app.embedding import get_embedding_model
 from app.llm_client import provider_metrics
-from app.models import AuthenticatedUser, QueryRequest, QueryResult
+from app.models import AuthenticatedUser, ExecutionTraceResponse, QueryRequest, QueryResult
 from app.pipeline import run_pipeline
 from app.reliability import (
     AllowAllRateLimiter,
@@ -24,6 +25,7 @@ from app.reliability import (
     classify_provider_error,
 )
 from app.tenant import get_user, provision_user, user_has_dataset
+from app.trace import InternalTrace, build_public_execution_trace
 from evaluation.datasets import dataset_catalog
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ async def lifespan(app: FastAPI):
     close_pool()
 
 
-app = FastAPI(title="SchemaDrill", version="0.2.3", lifespan=lifespan)
+app = FastAPI(title="SchemaDrill", version="0.3.0", lifespan=lifespan)
 
 
 def _derive_request_id(request: Request) -> str:
@@ -145,14 +147,34 @@ _PROVIDER_ERROR_RESPONSES: dict[str, tuple[str, str, int, str]] = {
 }
 
 
-def _raise_classified_query_error(
+def _error_response_with_trace(
+    *,
+    status_code: int,
+    detail: str,
+    headers: dict[str, str] | None = None,
+    execution_trace: ExecutionTraceResponse | None = None,
+) -> JSONResponse | None:
+    if execution_trace is None:
+        return None
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "detail": detail,
+            "execution_trace": execution_trace.model_dump(),
+        },
+        headers=headers,
+    )
+
+
+def _handle_classified_query_error(
     error: Exception,
     *,
     request_id: str,
     db: str,
     elapsed_ms: float,
     metrics: ReliabilityMetrics,
-) -> None:
+    execution_trace: ExecutionTraceResponse | None = None,
+) -> JSONResponse:
     info = classify_provider_error(error)
     response_spec = _PROVIDER_ERROR_RESPONSES.get(info.category)
     if response_spec is not None:
@@ -176,6 +198,14 @@ def _raise_classified_query_error(
             if info.retry_after_seconds is not None
             else None
         )
+        response = _error_response_with_trace(
+            status_code=status_code,
+            detail=detail,
+            headers=headers,
+            execution_trace=execution_trace,
+        )
+        if response is not None:
+            return response
         raise HTTPException(status_code=status_code, detail=detail, headers=headers) from error
 
     metrics.increment("query_failures")
@@ -189,11 +219,18 @@ def _raise_classified_query_error(
         info.root_error_type,
         info.status_code,
     )
+    response = _error_response_with_trace(
+        status_code=500,
+        detail="Query failed",
+        execution_trace=execution_trace,
+    )
+    if response is not None:
+        return response
     raise HTTPException(status_code=500, detail="Query failed") from error
 
 
 @app.post("/query", response_model=QueryResult)
-async def query(request: Request, payload: QueryRequest) -> QueryResult:
+async def query(request: Request, payload: QueryRequest) -> QueryResult | JSONResponse:
     settings = get_settings()
     request_id = get_request_id()
     user = current_user(request)
@@ -243,8 +280,12 @@ async def query(request: Request, payload: QueryRequest) -> QueryResult:
     slot_held = True
     started = time.perf_counter()
     logger.info("query_started request_id=%s db=%s", request_id, payload.db)
+    internal_trace = InternalTrace(request_id=request_id, db=payload.db)
+    pipeline_kwargs: dict[str, object] = {"settings": settings}
+    if "trace" in inspect.signature(run_pipeline).parameters:
+        pipeline_kwargs["trace"] = internal_trace
     task = asyncio.create_task(
-        asyncio.to_thread(run_pipeline, payload.question, payload.db, settings=settings)
+        asyncio.to_thread(run_pipeline, payload.question, payload.db, **pipeline_kwargs)
     )
     try:
         result = await asyncio.wait_for(
@@ -263,14 +304,30 @@ async def query(request: Request, payload: QueryRequest) -> QueryResult:
             )
             task.add_done_callback(lambda _: application.state.query_slots.release())
             slot_held = False
+            timeout_trace = (
+                build_public_execution_trace(internal_trace)
+                if internal_trace.has_stages()
+                else None
+            )
+            timeout_response = _error_response_with_trace(
+                status_code=504,
+                detail="Query timed out",
+                execution_trace=timeout_trace,
+            )
+            if timeout_response is not None:
+                return timeout_response
             raise HTTPException(status_code=504, detail="Query timed out") from error
 
-        _raise_classified_query_error(
+        execution_trace = getattr(error, "_execution_trace", None)
+        if execution_trace is None and internal_trace.has_stages():
+            execution_trace = build_public_execution_trace(internal_trace, finalize=True)
+        return _handle_classified_query_error(
             error,
             request_id=request_id,
             db=payload.db,
             elapsed_ms=elapsed_ms,
             metrics=application.state.metrics,
+            execution_trace=execution_trace,
         )
     finally:
         if slot_held:

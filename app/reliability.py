@@ -286,6 +286,7 @@ def call_with_provider_retry_sync(
     sleep: Callable[[float], None] = time.sleep,
     random_value: Callable[[], float] = random.random,
     metrics: ReliabilityMetrics | None = None,
+    on_retry: Callable[[int, ProviderErrorInfo], None] | None = None,
 ) -> Any:
     for attempt in range(1, policy.max_attempts + 1):
         try:
@@ -299,5 +300,7 @@ def call_with_provider_retry_sync(
                 raise
             delay = _compute_retry_delay(error, attempt, policy, random_value)
             _log_provider_retry(error, attempt, delay)
+            if on_retry is not None:
+                on_retry(attempt, classify_provider_error(error))
             metrics.increment("provider_retries") if metrics else None
             sleep(delay)

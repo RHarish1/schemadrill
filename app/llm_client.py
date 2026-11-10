@@ -8,6 +8,7 @@ from google.genai import types
 from app.config import get_request_id, get_settings
 from app.models import SqlResponse
 from app.reliability import ReliabilityMetrics, RetryPolicy, call_with_provider_retry_sync
+from app.trace import get_current_trace
 
 logger = logging.getLogger(__name__)
 provider_metrics = ReliabilityMetrics()
@@ -56,6 +57,17 @@ def generate(messages: list[dict[str, str]]) -> SqlResponse:
             response_model=SqlResponse,
         )
 
+    trace = get_current_trace()
+
+    def record_retry(attempt: int, info) -> None:
+        if trace is not None:
+            trace.record_provider_retry(
+                attempt=attempt,
+                category=info.category,
+                status_code=info.status_code,
+                root_error_type=info.root_error_type,
+            )
+
     started = time.perf_counter()
     response = call_with_provider_retry_sync(
         request,
@@ -66,6 +78,7 @@ def generate(messages: list[dict[str, str]]) -> SqlResponse:
             jitter_seconds=settings.provider_backoff_jitter_seconds,
         ),
         metrics=provider_metrics,
+        on_retry=record_retry,
     )
     elapsed_ms = (time.perf_counter() - started) * 1000
     logger.info(

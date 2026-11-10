@@ -16,6 +16,7 @@ import {
   saveDraftQuery,
   signOutUser,
 } from "./auth";
+import ExecutionTraceDrawer from "./components/ExecutionTraceDrawer";
 import "./styles.css";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -280,6 +281,7 @@ function App() {
         setError({
           message: payload.reason || "The query could not be executed.",
           details: payload,
+          executionTrace: payload.execution_trace || null,
         });
       } else {
         setApiOnline(true);
@@ -298,6 +300,8 @@ function App() {
           requestError instanceof ApiRequestError ? requestError.message : "Something went wrong.",
         details:
           requestError instanceof ApiRequestError ? requestError.technicalDetails : undefined,
+        executionTrace:
+          requestError instanceof ApiRequestError ? requestError.executionTrace || null : null,
       });
     } finally {
       setLoading(false);
@@ -485,7 +489,25 @@ function ResultsPanel({ loading, result, error, sessionExpired, signingIn, onSig
       </section>
     );
   }
-  if (error) return <section className="answer-panel centered error-state"><span className="error-icon">!</span><h2>Couldn’t run that query</h2><p>{error.message}</p>{error.details && <details><summary>Technical details</summary><pre>{typeof error.details === "string" ? error.details : JSON.stringify(error.details, null, 2)}</pre></details>}</section>;
+  if (error) {
+    return (
+      <section className={`answer-panel centered error-state ${error.executionTrace ? "has-trace" : ""}`}>
+        <span className="error-icon">!</span>
+        <h2>Couldn’t run that query</h2>
+        <p>{error.message}</p>
+        {error.executionTrace ? (
+          <ExecutionTraceDrawer trace={error.executionTrace} defaultOpen={true} />
+        ) : (
+          error.details && (
+            <details>
+              <summary>Technical details</summary>
+              <pre>{typeof error.details === "string" ? error.details : JSON.stringify(error.details, null, 2)}</pre>
+            </details>
+          )
+        )}
+      </section>
+    );
+  }
   if (!result) return <section className="answer-panel centered"><div className="empty-icon">⌁</div><h2>Your answer will appear here</h2><p>Ask a question to generate a query and explore your data.</p><div className="empty-line" /></section>;
   return <Result result={result} />;
 }
@@ -520,7 +542,15 @@ function Result({ result }) {
     {rows.length ? <div className="table-wrap"><table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{columns.map((column) => <td key={column} className={row[column] === null ? "null" : ""}>{row[column] === null ? "NULL" : String(row[column])}</td>)}</tr>)}</tbody></table></div> : <div className="no-rows">The query completed successfully but returned no rows.</div>}
     <div className="sql-heading"><span className="block-label">GENERATED SQL</span><button onClick={copySql} disabled={!sql}>{copied ? "Copied" : "Copy SQL"}</button></div>
     <pre className="sql">{sql || "SQL was not returned by the API."}</pre>
-    <details open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}><summary><span className="block-label">EXECUTION DETAILS</span><span>{detailsOpen ? "⌃" : "⌄"}</span></summary><div className="details-grid"><span>Dataset<strong>{result.dataset || "chinook"}</strong></span><span>Attempts<strong>{result.attempts}</strong></span><span>Status<strong>{result.status}</strong></span></div></details>
+    {result.execution_trace ? (
+      <ExecutionTraceDrawer
+        trace={result.execution_trace}
+        dataset={result.dataset || "chinook"}
+        defaultOpen={false}
+      />
+    ) : (
+      <details open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}><summary><span className="block-label">EXECUTION DETAILS</span><span>{detailsOpen ? "⌃" : "⌄"}</span></summary><div className="details-grid"><span>Dataset<strong>{result.dataset || "chinook"}</strong></span><span>Attempts<strong>{result.attempts}</strong></span><span>Status<strong>{result.status}</strong></span></div></details>
+    )}
   </section>;
 }
 
