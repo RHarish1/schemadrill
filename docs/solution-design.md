@@ -310,3 +310,31 @@ bill without needing user databases.
 - **Alternatives considered:** Renaming `Settings.max_retries` across `app/` and `evaluation/`
   (rejected: unnecessary churn across tests and benchmark configs); allowing unbounded `top_k` or
   `max_retries` in `QueryRequest` (rejected: risks token/latency abuse).
+
+## 15. Redis hosting & CI/CD strategy: Upstash on Cloud Run, no remote Redis in GitHub Actions (shipped in v0.4.1)
+
+- **Decision:**
+  - **Production (Cloud Run, `asia-south1`):** Host Redis on **Upstash Redis** (serverless,
+    free tier, TLS `rediss://...`), store the connection string in GCP Secret Manager as
+    `schemadrill-redis-url`, and mount it declaratively via `--update-secrets` in
+    [cloudbuild.yaml](../cloudbuild.yaml).
+  - **GitHub Actions CI:** Do **not** configure `REDIS_URL` or connect to Upstash/external
+    Redis in `.github/workflows/ci.yml`. Unit tests in `quality` exercise `RedisRateLimiter`
+    with `FakeRedis`, and `docker-postgres` brings up the isolated `redis:7-alpine` container
+    from `docker-compose.yml` during `docker compose up -d app`.
+  - **Local development:** `docker compose up` runs `redis:7-alpine` with
+    `REDIS_URL=redis://redis:6379/0` and zero external secrets; bare local runs without
+    `REDIS_URL` fall back cleanly to `AllowAllRateLimiter`.
+- **Why:**
+  - Upstash scales to zero on a free tier and connects over public TLS (`rediss://`) without
+    requiring a Serverless VPC Access connector, whereas GCP Memorystore starts around
+    \$36/month and requires VPC egress configuration.
+  - Because SchemaDrill's backend is Python/FastAPI (`redis.asyncio.from_url(settings.redis_url)`),
+    it uses the standard `rediss://` TCP/TLS URL directly rather than `@upstash/redis` or
+    `UPSTASH_REDIS_REST_*` JS/REST clients (the Vite React frontend is a static browser SPA and
+    must never hold Redis credentials).
+  - Keeping Upstash out of GitHub Actions avoids external network flakiness, unnecessary
+    latency, and cross-PR rate-limit key collisions.
+- **Alternatives considered:** GCP Memorystore (rejected: fixed monthly cost + VPC connector);
+  connecting GitHub Actions to Upstash via a repository secret (rejected: shared mutable state
+  across concurrent CI runs); `@upstash/redis` JS client (rejected: backend is Python/FastAPI).

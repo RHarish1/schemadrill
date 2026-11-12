@@ -144,6 +144,7 @@ Two DB roles: `schemadrill_readonly` (serving) and `schemadrill_admin` (ingestio
 | 18 | **Cloud Run Source/Artifact Registry deploy, `min=0`**, Cloud Logging only | Low-cost demo | Cold starts |
 | 19 | **Committed CodeQL Advanced Setup (`codeql.yml`) pinned to `v4.39.1`** (`actions`, `javascript-typescript`, `python`) | GitHub Default Setup (`dynamic`, `@v4`) deleted pre-cached `2.27.3`, hit `504` downloading `2.27.4`, and disabled UI reruns | Requires Default Setup disabled in repo settings; bump pinned tag periodically |
 | 20 | **Per-request bounded tuning parameters on `POST /query`** (`top_k` 1–10, `fk_expansion`, `max_retries` 0–3) mapped to a request-scoped `Settings` copy | Lets authenticated UI and API callers choose latency vs recall/recovery without mutating global config or changing `run_pipeline` contracts | `QueryRequest.max_retries` (0–3 retries) maps to `1 + max_retries` total attempts in `run_pipeline` |
+| 21 | **Upstash Redis (`rediss://`) via Secret Manager in Cloud Run; no remote Redis in GitHub Actions or local `.env` required** | Upstash scales to zero on a free tier over public TLS without a VPC connector; local Compose uses `redis:7-alpine` and CI uses `FakeRedis` + Compose | Requires `schemadrill-redis-url` secret in GCP Secret Manager before Cloud Build deploys |
 
 ## 7. Known gaps and risks (honest list)
 

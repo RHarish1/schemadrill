@@ -41,6 +41,7 @@ jobs:
       - run: python -m pip install --retries 10 --timeout 120 -r requirements-dev.txt
       - run: ruff check .
       - run: black --check .
+      # Redis rate limiter tests use in-memory FakeRedis; no external Redis or REDIS_URL secret is used in CI.
       - run: pytest -q
 
   docker-postgres:
