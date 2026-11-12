@@ -278,3 +278,56 @@ Configure `NEON_AUTH_JWKS_URL`, `NEON_AUTH_ISSUER`, and `NEON_AUTH_AUDIENCE` for
 the backend, and `VITE_NEON_AUTH_URL` for the frontend. Enable Google as a
 provider in Neon Auth and add each deployed frontend origin to its trusted
 domains. `/health` remains public for Cloud Run health checks.
+
+### BYOK (Bring Your Own Key) & Tiers
+
+Signed-in users can run queries on the built-in **Free tier** (using the server's
+Gemini key) or supply their own Gemini API key (**BYOK**) for higher limits, model
+selection, and optional model fallback.
+
+| Feature | Free tier (no key) | BYOK (`X-LLM-Api-Key`) |
+| --- | --- | --- |
+| Rate limits | `FREE_TIER_HOURLY_LIMIT=5`/hr, `FREE_TIER_DAILY_LIMIT=15`/day, `FREE_TIER_GLOBAL_DAILY_LIMIT=300`/day | `BYOK_RATE_LIMIT_PER_MINUTE=30`/min |
+| Redis outage behavior | Fails closed (`503`) | Follows `REDIS_FAIL_OPEN` |
+| No-Redis fallback | In-process fixed-window limiter (never unlimited) | In-process fixed-window limiter |
+| Model selection | Fixed (`FREE_TIER_MODEL` or `MODEL_NAME`) | Any `generateContent` model validated for your key |
+| Fallback model | Disabled | Optional sticky fallback on provider exhaustion |
+| Retry budget | Capped (`FREE_TIER_MAX_RETRIES=2`, `FREE_TIER_PROVIDER_MAX_ATTEMPTS=2`) | Full (`max_retries` up to 3, `PROVIDER_MAX_ATTEMPTS`) |
+
+#### Entering your API key
+
+1. Sign in with Google in the SchemaDrill UI and click the tier badge (e.g. **Free tier**)
+   or **Add your key to use your own quota** to open **LLM API Key Settings**.
+2. Paste your Gemini API key (for example from Google AI Studio, `AIza...`) into the
+   password-masked input and click **Validate** (`POST /api/llm/validate`).
+3. Choose your **Primary model** and an optional **Fallback model** from the list
+   fetched with your key.
+4. For direct API calls, pass `X-LLM-Api-Key: <your-key>` (and optional
+   `X-LLM-Provider: gemini`) as HTTP headers on `/api/llm/validate` and `/query` —
+   never in the JSON body or URL.
+
+#### Security model (Phase 1)
+
+- **Never stored on the server, never logged:** Your key is wrapped in `SecretStr` on
+  entry, used only to build a per-request client, and redacted from logs and traces;
+  it transits server memory per request only.
+- **Browser `sessionStorage` only:** The SPA holds the key in module memory mirrored
+  to `sessionStorage` so it survives a refresh in the same tab. It is never written
+  to `localStorage`, cookies, IndexedDB, or URLs, and is cleared on **Clear key**,
+  sign-out, cross-tab `SIGNED_OUT`, or a `403 invalid_llm_key` response.
+
+#### BYOK & Tiering environment variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `FREE_TIER_MODEL` | `""` (falls back to `MODEL_NAME`) | Model used for free-tier queries |
+| `FREE_TIER_HOURLY_LIMIT` | `5` | Per-user free-tier hourly cap |
+| `FREE_TIER_DAILY_LIMIT` | `15` | Per-user free-tier daily cap |
+| `FREE_TIER_GLOBAL_DAILY_LIMIT` | `300` | Global daily free-tier cap across all users |
+| `FREE_TIER_MAX_RETRIES` | `2` | Max SQL self-correction retries on free tier |
+| `FREE_TIER_PROVIDER_MAX_ATTEMPTS` | `2` | Max provider retry attempts on free tier |
+| `BYOK_RATE_LIMIT_PER_MINUTE` | `30` | Per-user BYOK requests per minute |
+| `KEY_VALIDATE_LIMIT` | `5` | Per-user `/api/llm/validate` calls per minute |
+| `LLM_KEY_FINGERPRINT_PEPPER` | `""` | Server pepper for HMAC-SHA256 model-list cache keys |
+| `QUERY_DEADLINE_SECONDS` | `90.0` | End-to-end monotonic query deadline |
+| `MAX_TOTAL_PROVIDER_CALLS` | `12` | Max total provider calls per request (including fallback) |

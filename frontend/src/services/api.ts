@@ -1,15 +1,53 @@
 import type {
   DatasetCatalogResponse,
   ExecutionTrace,
+  LlmProvider,
   QueryRequest,
   QueryResult,
   UserProfile,
+  ValidateKeyResponse,
 } from "../types/api";
 import { authClient, getAuthToken, notifySessionExpired } from "../auth";
+import {
+  clearLlmKey,
+  getLlmApiKey,
+  getLlmProvider,
+  getSelectedFallbackModel,
+  getSelectedLlmModel,
+} from "../llmKey";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 30_000;
 const SESSION_EXPIRED_MESSAGE = "Your session expired. Sign in with Google to continue.";
+
+const invalidLlmKeyListeners = new Set<(detail: string) => void>();
+const rateLimitRemainingListeners = new Set<(remaining: number) => void>();
+
+export function onInvalidLlmKey(listener: (detail: string) => void): () => void {
+  invalidLlmKeyListeners.add(listener);
+  return () => {
+    invalidLlmKeyListeners.delete(listener);
+  };
+}
+
+function notifyInvalidLlmKey(detail: string): void {
+  for (const listener of invalidLlmKeyListeners) {
+    listener(detail);
+  }
+}
+
+export function onRateLimitRemaining(listener: (remaining: number) => void): () => void {
+  rateLimitRemainingListeners.add(listener);
+  return () => {
+    rateLimitRemainingListeners.delete(listener);
+  };
+}
+
+function notifyRateLimitRemaining(remaining: number): void {
+  for (const listener of rateLimitRemainingListeners) {
+    listener(remaining);
+  }
+}
 
 class ApiRequestError extends Error {
   constructor(
@@ -17,6 +55,8 @@ class ApiRequestError extends Error {
     public readonly technicalDetails?: string,
     public readonly status?: number,
     public readonly executionTrace?: ExecutionTrace,
+    public readonly code?: string,
+    public readonly rateLimitRemaining?: number,
   ) {
     super(message);
     this.name = "ApiRequestError";
@@ -64,6 +104,13 @@ async function request<T>(
         response = await sendAuthenticatedFetch(path, init, controller.signal, refreshedToken);
       }
     }
+    const rawRemaining = response.headers.get("X-RateLimit-Remaining");
+    const parsedRemaining =
+      rawRemaining !== null && /^\d+$/.test(rawRemaining) ? Number(rawRemaining) : undefined;
+    if (parsedRemaining !== undefined) {
+      notifyRateLimitRemaining(parsedRemaining);
+    }
+
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       if (includeAuth && response.status === 401) {
@@ -74,6 +121,10 @@ async function request<T>(
           401,
         );
       }
+      const code =
+        payload && typeof payload === "object" && "code" in payload && typeof payload.code === "string"
+          ? payload.code
+          : undefined;
       const detail =
         payload && typeof payload === "object" && "detail" in payload
           ? String(payload.detail)
@@ -86,7 +137,20 @@ async function request<T>(
         typeof payload.execution_trace === "object"
           ? (payload.execution_trace as ExecutionTrace)
           : undefined;
-      throw new ApiRequestError(detail, JSON.stringify(payload), response.status, executionTrace);
+
+      if (response.status === 403 && code === "invalid_llm_key") {
+        clearLlmKey();
+        notifyInvalidLlmKey(detail);
+      }
+
+      throw new ApiRequestError(
+        detail,
+        JSON.stringify(payload),
+        response.status,
+        executionTrace,
+        code,
+        parsedRemaining,
+      );
     }
     return payload as T;
   } catch (error) {
@@ -102,15 +166,49 @@ async function request<T>(
 
 export function queryDatabase(requestBody: QueryRequest) {
   const maxRetries = requestBody.max_retries ?? 1;
-  const timeoutMs = Math.max(REQUEST_TIMEOUT_MS, (1 + maxRetries) * 35_000);
+  const timeoutMs = Math.max(REQUEST_TIMEOUT_MS, (1 + maxRetries) * 35_000, 95_000);
+  const apiKey = getLlmApiKey();
+  const provider = getLlmProvider();
+  const selectedModel = getSelectedLlmModel();
+  const selectedFallback = getSelectedFallbackModel();
+
+  const headers: Record<string, string> = {};
+  const body: QueryRequest = { ...requestBody };
+  if (apiKey) {
+    headers["X-LLM-Api-Key"] = apiKey;
+    headers["X-LLM-Provider"] = provider;
+    if (selectedModel) {
+      body.model = selectedModel;
+    }
+    if (selectedFallback && selectedFallback !== selectedModel) {
+      body.fallback_model = selectedFallback;
+    }
+  }
+
   return request<QueryResult>(
     "/query",
     {
       method: "POST",
-      body: JSON.stringify(requestBody),
+      headers,
+      body: JSON.stringify(body),
     },
     true,
     timeoutMs,
+  );
+}
+
+export function validateLlmKey(apiKey: string, provider: LlmProvider = "gemini") {
+  return request<ValidateKeyResponse>(
+    "/api/llm/validate",
+    {
+      method: "POST",
+      headers: {
+        "X-LLM-Api-Key": apiKey.trim(),
+        "X-LLM-Provider": provider,
+      },
+    },
+    true,
+    15_000,
   );
 }
 

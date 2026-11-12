@@ -3,16 +3,17 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.parse import urlparse
 
 from psycopg import Error as PsycopgError
+from pydantic import SecretStr
 
 from app.config import Settings, get_request_id, get_settings
 from app.db import readonly_connection
 from app.executor import dry_run, execute
 from app.instrumentation import PipelineTelemetry
-from app.llm_client import generate
+from app.llm_client import ModelRoutingState, generate
 from app.models import QueryResult, RetrievalResult, RetryState, RowCapExceeded, SqlResponse
 from app.prompting import estimate_prompt_tokens, feedback, messages_for_retry
 from app.reliability import classify_provider_error, sanitize_log_detail
@@ -44,6 +45,8 @@ class _TerminalStage(Exception):
 
 def _provider_error_summary(error: Exception) -> str:
     category = classify_provider_error(error).category
+    if category == "invalid_key":
+        return "API key was rejected by provider."
     if category == "rate_limit":
         return "AI model rate limit reached."
     if category == "unavailable":
@@ -62,6 +65,8 @@ def build_pipeline_stages(
     allowed_tables: set[str] | None = None,
     telemetry: PipelineTelemetry | None = None,
     trace: InternalTrace | None = None,
+    api_key: SecretStr | None = None,
+    routing: ModelRoutingState | None = None,
 ) -> list[PipelineStage]:
     retrieve_fn = retrieve or get_retrieval_provider(settings).retrieve
     retrieval_complete = False
@@ -146,15 +151,26 @@ def build_pipeline_stages(
             trace.record_prompting(prompt_ms, estimate_prompt_tokens(messages), request_chars)
 
         llm_started = time.perf_counter()
+        active_model = (
+            routing.model_name if (routing and routing.model_name) else settings.model_name
+        )
         try:
             with telemetry.span("model_call", attempt=state.attempt) if telemetry else _null_span():
-                response = SqlResponse.model_validate(generate_sql(messages))
+                raw_response = (
+                    generate_sql(messages, api_key=api_key, routing=routing)
+                    if generate_sql is generate
+                    else generate_sql(messages)
+                )
+                response = SqlResponse.model_validate(raw_response)
         except Exception as error:
             llm_ms = (time.perf_counter() - llm_started) * 1000
+            used_model = routing.model_name if (routing and routing.model_name) else active_model
             if trace is not None:
+                if routing is not None:
+                    trace.fallback_used = routing.fallback_used
                 trace.record_llm_call(
                     provider="Google Gemini",
-                    model=settings.model_name,
+                    model=used_model,
                     duration_ms=llm_ms,
                 )
                 trace.record_stage(
@@ -163,17 +179,20 @@ def build_pipeline_stages(
                     duration_ms=llm_ms,
                     details={
                         "provider": "Google Gemini",
-                        "model": settings.model_name,
+                        "model": used_model,
                         "summary": _provider_error_summary(error),
                     },
                 )
             raise
 
         llm_ms = (time.perf_counter() - llm_started) * 1000
+        used_model = routing.model_name if (routing and routing.model_name) else active_model
         if trace is not None:
+            if routing is not None:
+                trace.fallback_used = routing.fallback_used
             trace.record_llm_call(
                 provider="Google Gemini",
-                model=settings.model_name,
+                model=used_model,
                 duration_ms=llm_ms,
             )
             trace.record_stage(
@@ -182,7 +201,7 @@ def build_pipeline_stages(
                 duration_ms=llm_ms,
                 details={
                     "provider": "Google Gemini",
-                    "model": settings.model_name,
+                    "model": used_model,
                 },
             )
         if telemetry:
@@ -387,11 +406,19 @@ def run_pipeline(
     allowed_tables: set[str] | None = None,
     telemetry: PipelineTelemetry | None = None,
     trace: InternalTrace | None = None,
+    api_key: SecretStr | None = None,
+    routing: ModelRoutingState | None = None,
+    tier: Literal["free", "byok"] | None = None,
 ) -> QueryResult:
     settings = settings or get_settings()
     internal_trace = trace or InternalTrace(request_id=get_request_id(), db=db)
     internal_trace.started_at = time.perf_counter()
-    internal_trace.model = settings.model_name
+    internal_trace.tier = tier
+    internal_trace.model = (
+        routing.model_name if (routing and routing.model_name) else settings.model_name
+    )
+    if routing is not None:
+        internal_trace.fallback_used = routing.fallback_used
     internal_trace.top_k = None if settings.full_schema_retrieval else settings.top_k
     internal_trace.fk_expansion = settings.enable_fk_expansion
     internal_trace.execution_mode = (
@@ -414,6 +441,8 @@ def run_pipeline(
         allowed_tables,
         telemetry,
         internal_trace,
+        api_key=api_key,
+        routing=routing,
     )
     effective_attempt_budget = 1 if settings.disable_self_correction else settings.max_retries
 

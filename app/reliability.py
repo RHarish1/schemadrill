@@ -11,7 +11,7 @@ from email.utils import parsedate_to_datetime
 from threading import Lock
 from typing import Any, Literal, Protocol
 
-from app.config import get_request_id
+from app.config import get_active_llm_key, get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,12 @@ _SECRET_PATTERNS = (
     re.compile(r"(Bearer\s+)[^\s\"']+", re.IGNORECASE),
     re.compile(r"\b(?:AIza|AQ\.)[A-Za-z0-9._-]{8,}"),
     re.compile(r"(://[^:/\s]+:)[^@/\s]+(@)"),
+)
+_INVALID_KEY_PHRASES = (
+    "api key not valid",
+    "api_key_invalid",
+    "api key expired",
+    "invalid api key",
 )
 _MAX_LOG_DETAIL_CHARS = 300
 
@@ -37,8 +43,17 @@ class ReliabilityMetrics:
             return dict(self._counts)
 
 
+@dataclass(frozen=True)
+class RateLimitResult:
+    allowed: bool
+    remaining: int
+    retry_after: int
+
+
 class RateLimiter(Protocol):
     async def allow(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]: ...
+
+    async def check(self, key: str, limit: int, window_seconds: int) -> RateLimitResult: ...
 
 
 class RedisRateLimiter:
@@ -52,17 +67,61 @@ class RedisRateLimiter:
         self.client = client
         self.prefix = prefix
 
-    async def allow(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
+    async def check(self, key: str, limit: int, window_seconds: int) -> RateLimitResult:
         count, ttl = await self.client.eval(
             self._SCRIPT,
             1,
             f"{self.prefix}:{key}",
             window_seconds,
         )
-        return int(count) <= limit, max(int(ttl), 1)
+        count_int = int(count)
+        return RateLimitResult(
+            allowed=count_int <= limit,
+            remaining=max(0, limit - count_int),
+            retry_after=max(int(ttl), 1),
+        )
+
+    async def allow(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
+        result = await self.check(key, limit, window_seconds)
+        return result.allowed, result.retry_after
+
+
+class InMemoryRateLimiter:
+    """Thread-safe fixed-window rate limiter used when Redis is not configured."""
+
+    def __init__(self, now: Callable[[], float] = time.monotonic) -> None:
+        self._now = now
+        self._lock = Lock()
+        self._buckets: dict[str, tuple[int, float]] = {}
+
+    async def check(self, key: str, limit: int, window_seconds: int) -> RateLimitResult:
+        now = self._now()
+        with self._lock:
+            entry = self._buckets.get(key)
+            if entry is None or now >= entry[1]:
+                count = 1
+                expires_at = now + window_seconds
+            else:
+                count = entry[0] + 1
+                expires_at = entry[1]
+            self._buckets[key] = (count, expires_at)
+            retry_after = max(1, math.ceil(expires_at - now))
+            return RateLimitResult(
+                allowed=count <= limit,
+                remaining=max(0, limit - count),
+                retry_after=retry_after,
+            )
+
+    async def allow(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
+        result = await self.check(key, limit, window_seconds)
+        return result.allowed, result.retry_after
 
 
 class AllowAllRateLimiter:
+    async def check(self, key: str, limit: int, window_seconds: int) -> RateLimitResult:
+        del key, window_seconds
+        return RateLimitResult(allowed=True, remaining=limit, retry_after=1)
+
     async def allow(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
         del key, limit, window_seconds
         return True, 1
@@ -74,6 +133,7 @@ class RetryPolicy:
     base_delay_seconds: float
     max_delay_seconds: float
     jitter_seconds: float
+    deadline: float | None = None
 
 
 def retry_after_seconds(value: str | None, now: Callable[[], float] = time.time) -> float | None:
@@ -90,7 +150,7 @@ def retry_after_seconds(value: str | None, now: Callable[[], float] = time.time)
 
 @dataclass(frozen=True)
 class ProviderErrorInfo:
-    category: Literal["rate_limit", "unavailable", "internal"]
+    category: Literal["invalid_key", "rate_limit", "unavailable", "internal"]
     status_code: int | None
     retry_after_seconds: int | None
     root_error_type: str
@@ -103,6 +163,11 @@ def sanitize_log_detail(text: str | None) -> str | None:
     line = next((part.strip() for part in text.splitlines() if part.strip()), "")
     if not line:
         return None
+    active_key = get_active_llm_key()
+    if active_key is not None:
+        secret = active_key.get_secret_value()
+        if secret and secret in line:
+            line = line.replace(secret, "[REDACTED]")
     for pattern in _SECRET_PATTERNS:
         if pattern.groups >= 2:
             line = pattern.sub(r"\1[REDACTED]\2", line)
@@ -170,7 +235,22 @@ def provider_retry_after(error: BaseException) -> str | None:
     return None
 
 
+def is_invalid_key_error(error: BaseException) -> bool:
+    status = provider_status_code(error)
+    if status in (401, 403):
+        return True
+    if status == 400:
+        for exc in _iter_exception_chain(error):
+            msg = getattr(exc, "message", None)
+            text = (msg if isinstance(msg, str) else str(exc)).lower()
+            if any(phrase in text for phrase in _INVALID_KEY_PHRASES):
+                return True
+    return False
+
+
 def is_retryable_provider_error(error: BaseException) -> bool:
+    if is_invalid_key_error(error):
+        return False
     for exc in _iter_exception_chain(error):
         if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
             return True
@@ -188,8 +268,11 @@ def classify_provider_error(error: BaseException) -> ProviderErrorInfo:
         isinstance(exc, (TimeoutError, ConnectionError, OSError)) for exc in chain
     )
 
-    if status == 429:
-        category: Literal["rate_limit", "unavailable", "internal"] = "rate_limit"
+    if is_invalid_key_error(error):
+        category: Literal["invalid_key", "rate_limit", "unavailable", "internal"] = "invalid_key"
+        retry_after = None
+    elif status == 429:
+        category = "rate_limit"
     elif (status is not None and 500 <= status <= 599) or is_transport_error:
         category = "unavailable"
     else:
@@ -260,6 +343,7 @@ async def call_with_provider_retry(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     random_value: Callable[[], float] = random.random,
     metrics: ReliabilityMetrics | None = None,
+    now: Callable[[], float] = time.monotonic,
 ) -> Any:
     for attempt in range(1, policy.max_attempts + 1):
         try:
@@ -274,6 +358,12 @@ async def call_with_provider_retry(
                 _log_provider_exhausted(error, attempt, policy.max_attempts, retryable)
                 raise
             delay = _compute_retry_delay(error, attempt, policy, random_value)
+            if policy.deadline is not None:
+                remaining = policy.deadline - now()
+                if remaining <= 0 or delay >= remaining:
+                    metrics.increment("provider_exhausted") if metrics else None
+                    _log_provider_exhausted(error, attempt, policy.max_attempts, retryable)
+                    raise
             _log_provider_retry(error, attempt, delay)
             metrics.increment("provider_retries") if metrics else None
             await sleep(delay)
@@ -287,6 +377,7 @@ def call_with_provider_retry_sync(
     random_value: Callable[[], float] = random.random,
     metrics: ReliabilityMetrics | None = None,
     on_retry: Callable[[int, ProviderErrorInfo], None] | None = None,
+    now: Callable[[], float] = time.monotonic,
 ) -> Any:
     for attempt in range(1, policy.max_attempts + 1):
         try:
@@ -299,6 +390,12 @@ def call_with_provider_retry_sync(
                 _log_provider_exhausted(error, attempt, policy.max_attempts, retryable)
                 raise
             delay = _compute_retry_delay(error, attempt, policy, random_value)
+            if policy.deadline is not None:
+                remaining = policy.deadline - now()
+                if remaining <= 0 or delay >= remaining:
+                    metrics.increment("provider_exhausted") if metrics else None
+                    _log_provider_exhausted(error, attempt, policy.max_attempts, retryable)
+                    raise
             _log_provider_retry(error, attempt, delay)
             if on_retry is not None:
                 on_retry(attempt, classify_provider_error(error))

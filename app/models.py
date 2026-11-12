@@ -45,6 +45,26 @@ class QueryRequest(BaseModel):
             "validation. Max is 3."
         ),
     )
+    model: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional model ID when using your own API key (BYOK).",
+    )
+    fallback_model: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional fallback model ID when using your own API key (BYOK).",
+    )
+
+
+class ModelInfoResponse(BaseModel):
+    id: str
+    display_name: str
+
+
+class ValidateKeyResponse(BaseModel):
+    valid: bool
+    models: list[ModelInfoResponse] = Field(default_factory=list)
 
 
 class PublicStageTrace(BaseModel):
@@ -60,6 +80,9 @@ class ExecutionTraceResponse(BaseModel):
     top_k: int | None = None
     fk_expansion: bool | None = None
     execution_mode: str = "read_only"
+    tier: Literal["free", "byok"] | None = None
+    model: str | None = None
+    fallback_used: bool = False
     retry_count: int = 0
     retry_reasons: list[str] = Field(default_factory=list)
     total_duration_ms: float = 0.0

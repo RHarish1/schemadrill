@@ -176,7 +176,7 @@ def test_wrapped_failed_attempts_and_non_retryable_401():
     assert provider_status_code(wrapped) == 401
     assert not is_retryable_provider_error(wrapped)
     info = classify_provider_error(wrapped)
-    assert info.category == "internal"
+    assert info.category == "invalid_key"
     assert info.root_error_type == "ClientError"
 
 

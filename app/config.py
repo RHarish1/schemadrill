@@ -2,9 +2,11 @@ import logging
 from contextvars import ContextVar
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REQUEST_ID_VAR: ContextVar[str] = ContextVar("request_id", default="-")
+_ACTIVE_LLM_KEY_VAR: ContextVar[SecretStr | None] = ContextVar("active_llm_key", default=None)
 
 
 def get_request_id() -> str:
@@ -19,13 +21,42 @@ def reset_request_id(token) -> None:
     _REQUEST_ID_VAR.reset(token)
 
 
+def get_active_llm_key() -> SecretStr | None:
+    return _ACTIVE_LLM_KEY_VAR.get()
+
+
+def set_active_llm_key(api_key: SecretStr | None):
+    return _ACTIVE_LLM_KEY_VAR.set(api_key)
+
+
+def reset_active_llm_key(token) -> None:
+    _ACTIVE_LLM_KEY_VAR.reset(token)
+
+
 class Settings(BaseSettings):
     database_url: str = "postgresql://schemadrill_readonly:schemadrill@localhost:5432/schemadrill"
     ingest_database_url: str = (
         "postgresql://schemadrill_admin:schemadrill@localhost:5432/schemadrill"
     )
-    gemini_api_key: str = ""
+    gemini_api_key: SecretStr = SecretStr("")
     model_name: str = "gemini-3.1-flash-lite"
+    free_tier_model: str = ""
+    free_tier_hourly_limit: int = 5
+    free_tier_daily_limit: int = 15
+    free_tier_global_daily_limit: int = 300
+    free_tier_max_retries: int = 2
+    free_tier_provider_max_attempts: int = 2
+    byok_rate_limit_per_minute: int = 30
+    key_validate_limit: int = 5
+    llm_key_fingerprint_pepper: SecretStr = SecretStr("")
+    query_deadline_seconds: float = 90.0
+    max_total_provider_calls: int = 12
+    gemini_fallback_models: list[str] = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
+        "gemini-3.1-flash-lite",
+    ]
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     preload_embedding_model: bool = True
     full_schema_retrieval: bool = False

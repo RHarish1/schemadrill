@@ -33,6 +33,7 @@ _PUBLIC_RETRY_LABELS: dict[str, str] = {
     "row_cap": "Result row limit exceeded",
     "rate_limit": "Provider rate limit",
     "unavailable": "Provider unavailable",
+    "invalid_key": "Invalid API key",
     "internal": "Provider error",
 }
 
@@ -85,8 +86,10 @@ class InternalTrace:
     request_characters: int = 0
 
     # LLM telemetry
+    tier: Literal["free", "byok"] | None = None
     provider: str = "Google Gemini"
     model: str = ""
+    fallback_used: bool = False
     llm_duration_ms: float = 0.0
     provider_retries: int = 0
     provider_retry_reasons: list[dict[str, object]] = field(default_factory=list)
@@ -330,6 +333,9 @@ def build_public_execution_trace(
             top_k=trace.top_k,
             fk_expansion=trace.fk_expansion,
             execution_mode=trace.execution_mode,
+            tier=trace.tier,
+            model=trace.model or None,
+            fallback_used=trace.fallback_used,
             retry_count=trace.pipeline_retries + trace.provider_retries,
             retry_reasons=retry_reasons,
             total_duration_ms=round(total_ms, 2),

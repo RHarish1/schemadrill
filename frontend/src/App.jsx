@@ -4,6 +4,8 @@ import {
   checkHealth,
   getCurrentUser,
   listDatasets,
+  onInvalidLlmKey,
+  onRateLimitRemaining,
   queryDatabase,
 } from "./services/api";
 import {
@@ -16,7 +18,9 @@ import {
   saveDraftQuery,
   signOutUser,
 } from "./auth";
+import { clearLlmKey, getKeyLast4, getSelectedLlmModel, onLlmKeyChange } from "./llmKey";
 import ExecutionTraceDrawer from "./components/ExecutionTraceDrawer";
+import SettingsModal from "./components/SettingsModal";
 import "./styles.css";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -76,7 +80,15 @@ function App() {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [authError, setAuthError] = useState(null);
   const [avatarBroken, setAvatarBroken] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialError, setSettingsInitialError] = useState(null);
+  const [rateLimitRemaining, setRateLimitRemaining] = useState(null);
+  const [, setLlmKeyVersion] = useState(0);
   const hadActiveSessionRef = useRef(false);
+
+  const keyLast4 = getKeyLast4();
+  const activeByokModel = getSelectedLlmModel();
+  const usingByok = Boolean(keyLast4);
 
   const selectedDataset = datasets.find((item) => item.id === dataset);
   const signedInUserId = user?.id || (session ? "authenticated" : "");
@@ -160,6 +172,7 @@ function App() {
     });
     const unsubscribeCrossTab = onCrossTabAuthEvent((eventType) => {
       if (eventType === "SIGNED_OUT") {
+        clearLlmKey();
         hadActiveSessionRef.current = false;
         setSession(null);
         setUser(null);
@@ -172,15 +185,29 @@ function App() {
         setError(null);
         setSessionExpired(false);
         setAuthError(null);
+        setRateLimitRemaining(null);
       } else if (eventType === "SIGNED_IN" && !hadActiveSessionRef.current) {
         fetchAuthSession({ forceRefresh: true }).then((sessionData) => {
           if (sessionData) applyAuthenticatedSession(sessionData);
         });
       }
     });
+    const unsubscribeLlmKey = onLlmKeyChange(() => {
+      setLlmKeyVersion((v) => v + 1);
+    });
+    const unsubscribeInvalidKey = onInvalidLlmKey((detail) => {
+      setSettingsInitialError(detail);
+      setSettingsOpen(true);
+    });
+    const unsubscribeRateLimit = onRateLimitRemaining((remaining) => {
+      setRateLimitRemaining(remaining);
+    });
     return () => {
       unsubscribeExpired();
       unsubscribeCrossTab();
+      unsubscribeLlmKey();
+      unsubscribeInvalidKey();
+      unsubscribeRateLimit();
     };
   }, [applyAuthenticatedSession, markSessionExpired]);
 
@@ -342,6 +369,7 @@ function App() {
       setError({
         message:
           requestError instanceof ApiRequestError ? requestError.message : "Something went wrong.",
+        code: requestError instanceof ApiRequestError ? requestError.code : undefined,
         details:
           requestError instanceof ApiRequestError ? requestError.technicalDetails : undefined,
         executionTrace:
@@ -408,6 +436,28 @@ function App() {
               disabled={signingIn}
             >
               {signingIn ? "Redirecting..." : "Sign in with Google"}
+            </button>
+          )}
+          {session && (
+            <button
+              type="button"
+              className={`tier-badge-btn ${usingByok ? "is-byok" : "is-free"}`}
+              onClick={() => {
+                setSettingsInitialError(null);
+                setSettingsOpen(true);
+              }}
+              title={
+                usingByok
+                  ? `Using your Gemini key ending •••• ${keyLast4}`
+                  : "Add your key to use your own quota"
+              }
+            >
+              <i />
+              {usingByok
+                ? `Using your key${activeByokModel ? ` · ${activeByokModel}` : ""}`
+                : rateLimitRemaining !== null
+                  ? `Free tier: ${rateLimitRemaining} left`
+                  : "Free tier"}
             </button>
           )}
           <span className={`status ${apiOnline === false ? "offline" : ""}`}>
@@ -581,6 +631,20 @@ function App() {
               {loading ? <><span className="spinner" /> Running query...</> : <>Run query <b>↗</b></>}
             </button>
             <p className="shortcut">Press <kbd>Ctrl</kbd><span>↵</span> or <kbd>⌘</kbd><span>↵</span> to run</p>
+            {session && !usingByok && (
+              <p className="byok-hint">
+                <button
+                  type="button"
+                  className="byok-hint-btn"
+                  onClick={() => {
+                    setSettingsInitialError(null);
+                    setSettingsOpen(true);
+                  }}
+                >
+                  Add your key to use your own quota
+                </button>
+              </p>
+            )}
           </form>
           <ResultsPanel
             loading={loading}
@@ -589,15 +653,24 @@ function App() {
             sessionExpired={sessionExpired}
             signingIn={signingIn}
             onSignIn={signIn}
+            onOpenSettings={() => {
+              setSettingsInitialError(null);
+              setSettingsOpen(true);
+            }}
           />
         </section>
       </main>
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        initialError={settingsInitialError}
+      />
       <footer><span>SchemaDrill <b>·</b> Safe by design</span><span>Queries are bounded and read-only</span></footer>
     </div>
   );
 }
 
-function ResultsPanel({ loading, result, error, sessionExpired, signingIn, onSignIn }) {
+function ResultsPanel({ loading, result, error, sessionExpired, signingIn, onSignIn, onOpenSettings }) {
   if (loading) return <section className="answer-panel centered"><span className="loader" /><h2>Working on it...</h2><p>Generating and validating a read-only query.</p></section>;
   if (sessionExpired && !result) {
     return (
@@ -624,6 +697,15 @@ function ResultsPanel({ loading, result, error, sessionExpired, signingIn, onSig
         <span className="error-icon">!</span>
         <h2>Couldn’t run that query</h2>
         <p>{error.message}</p>
+        {error.code === "free_tier_exhausted" && (
+          <button
+            className="panel-action-btn"
+            type="button"
+            onClick={onOpenSettings}
+          >
+            Add Gemini API key
+          </button>
+        )}
         {error.executionTrace ? (
           <ExecutionTraceDrawer trace={error.executionTrace} defaultOpen={true} />
         ) : (

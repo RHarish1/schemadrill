@@ -1,9 +1,23 @@
+export type LlmProvider = "gemini";
+
+export interface LlmModelInfo {
+  id: string;
+  display_name: string;
+}
+
+export interface ValidateKeyResponse {
+  valid: boolean;
+  models: LlmModelInfo[];
+}
+
 export interface QueryRequest {
   db: string;
   question: string;
   top_k?: number;
   fk_expansion?: boolean;
   max_retries?: number;
+  model?: string;
+  fallback_model?: string;
 }
 
 export interface DatasetOption {
@@ -38,6 +52,9 @@ export interface ExecutionTrace {
   top_k?: number | null;
   fk_expansion?: boolean | null;
   execution_mode?: string;
+  tier?: "free" | "byok" | null;
+  model?: string | null;
+  fallback_used?: boolean;
   retry_count: number;
   retry_reasons?: string[];
   total_duration_ms: number;

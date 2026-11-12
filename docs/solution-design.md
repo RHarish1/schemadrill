@@ -338,3 +338,9 @@ bill without needing user databases.
 - **Alternatives considered:** GCP Memorystore (rejected: fixed monthly cost + VPC connector);
   connecting GitHub Actions to Upstash via a repository secret (rejected: shared mutable state
   across concurrent CI runs); `@upstash/redis` JS client (rejected: backend is Python/FastAPI).
+
+## 16. Phase 1 BYOK: browser-held keys, tiering, and model fallback (shipped in v0.5.0)
+
+- **Decision:** Implement Phase 1 BYOK with browser-held keys (`sessionStorage` + module memory only), per-request `SecretStr` transport via `X-LLM-Api-Key` / `X-LLM-Provider` headers, an `LLMProvider` abstraction (`app/providers/`), strict free-tier vs BYOK rate-limiting, `POST /api/llm/validate` with HMAC-SHA256 fingerprinted model caching, `invalid_key` (`403 invalid_llm_key`) vs `401` session-expiry separation, and sticky model fallback under a monotonic `QUERY_DEADLINE_SECONDS` and `MAX_TOTAL_PROVIDER_CALLS` cap.
+- **Why:** Users can bring their own Gemini quota and pick models immediately without requiring KMS, encrypted DB columns, or key custody on the server, while the server's free-tier key stays protected by fail-closed hourly/daily/global caps and an in-memory fallback limiter when Redis is unset.
+- **Security statement:** Keys are never stored on the server, never logged, and never placed in `RetryState`, `InternalTrace`, or public traces; they transit server memory per request only.

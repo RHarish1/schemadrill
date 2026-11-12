@@ -93,7 +93,10 @@ def test_query_exposes_model_rate_limit_safely_and_logs_details(monkeypatch, cap
     assert response.headers["Retry-After"] == "7"
     assert response.headers["X-Request-Id"] == "req-429-test"
     assert response.json() == {
-        "detail": "The AI model limit was reached. Please wait a moment and try again."
+        "detail": (
+            "The free tier AI model is temporarily busy. Please try again in a moment "
+            "or add your own Gemini API key in Settings."
+        )
     }
     assert "query_provider_rate_limited" in caplog.text
     assert "request_id=req-429-test" in caplog.text

@@ -1,5 +1,6 @@
 import { createAuthClient } from "@neondatabase/auth";
 import { BetterAuthReactAdapter } from "@neondatabase/auth/react/adapters";
+import { clearLlmKey } from "./llmKey";
 
 const authUrl = import.meta.env.VITE_NEON_AUTH_URL;
 const AUTH_CHANNEL_NAME = "schemadrill:auth";
@@ -121,6 +122,7 @@ export async function getAuthToken(options?: { forceRefresh?: boolean }): Promis
 
 export async function signOutUser(): Promise<void> {
   clearDraftQuery();
+  clearLlmKey();
   try {
     await authClient?.signOut();
   } finally {

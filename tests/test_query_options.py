@@ -200,7 +200,7 @@ def test_query_allows_up_to_three_retries_when_requested(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/query",
-            headers=headers,
+            headers={**headers, "X-LLM-Api-Key": "AIzaSyTestByokKey123456"},
             json={
                 "db": "chinook",
                 "question": "List artists",
