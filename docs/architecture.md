@@ -45,7 +45,7 @@ sequenceDiagram
     participant S as sql_guard
     participant D as Postgres (read-only role)
 
-    B->>A: POST /query {db, question} + Bearer JWT
+    B->>A: POST /query {db, question, top_k?, fk_expansion?, max_retries?} + Bearer JWT
     A->>Au: verify JWT (JWKS, issuer, aud)
     Au-->>A: sub (user_id)
     A->>T: provision_user(user_id) (idempotent)
@@ -143,6 +143,7 @@ Two DB roles: `schemadrill_readonly` (serving) and `schemadrill_admin` (ingestio
 | 17 | **Split provisioning URL**: admin URL used when the serving URL is the read-only role | Read-only role cannot create schemas | Two credentials in config |
 | 18 | **Cloud Run Source/Artifact Registry deploy, `min=0`**, Cloud Logging only | Low-cost demo | Cold starts |
 | 19 | **Committed CodeQL Advanced Setup (`codeql.yml`) pinned to `v4.39.1`** (`actions`, `javascript-typescript`, `python`) | GitHub Default Setup (`dynamic`, `@v4`) deleted pre-cached `2.27.3`, hit `504` downloading `2.27.4`, and disabled UI reruns | Requires Default Setup disabled in repo settings; bump pinned tag periodically |
+| 20 | **Per-request bounded tuning parameters on `POST /query`** (`top_k` 1–10, `fk_expansion`, `max_retries` 0–3) mapped to a request-scoped `Settings` copy | Lets authenticated UI and API callers choose latency vs recall/recovery without mutating global config or changing `run_pipeline` contracts | `QueryRequest.max_retries` (0–3 retries) maps to `1 + max_retries` total attempts in `run_pipeline` |
 
 ## 7. Known gaps and risks (honest list)
 

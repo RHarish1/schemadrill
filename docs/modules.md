@@ -25,7 +25,7 @@ evaluation.runner
 
 | Module | Responsibility | Main contract | Side effects |
 | --- | --- | --- | --- |
-| `app/main.py` | FastAPI application and HTTP boundary | `POST /query` accepts `QueryRequest`, returns `QueryResult`; `GET /api/me` returns `AuthenticatedUser` | Converts uncaught request errors to HTTP 500; closes the DB pool on shutdown |
+| `app/main.py` | FastAPI application and HTTP boundary | `POST /query` accepts `QueryRequest` (`question`, `db`, optional `top_k`, `fk_expansion`, `max_retries`), returns `QueryResult`; `GET /api/me` returns `AuthenticatedUser` | Converts uncaught request errors to HTTP 500; closes the DB pool on shutdown |
 | `app/config.py` | Environment-backed configuration | `Settings`, `get_settings()` | Loads `.env`; configures logging once through an LRU cache |
 | `app/models.py` | Pydantic request, response, DDL, retry, and exception contracts | `AuthenticatedUser`, `QueryRequest`, `QueryResult`, `SqlResponse`, `RetryState`, `DDLBlock` | Validation only; no I/O |
 | `app/pipeline.py` | Ordered query workflow and retry orchestration | `PipelineStage: RetryState -> RetryState`; `run_pipeline()` | Calls retrieval, Gemini, PostgreSQL `EXPLAIN`, and execution; retains only latest retry SQL/error |

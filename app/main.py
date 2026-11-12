@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     close_pool()
 
 
-app = FastAPI(title="SchemaDrill", version="0.3.2", lifespan=lifespan)
+app = FastAPI(title="SchemaDrill", version="0.4.0", lifespan=lifespan)
 
 
 def _derive_request_id(request: Request) -> str:
@@ -279,9 +279,25 @@ async def query(request: Request, payload: QueryRequest) -> QueryResult | JSONRe
         raise HTTPException(status_code=503, detail="Query capacity is busy") from error
     slot_held = True
     started = time.perf_counter()
-    logger.info("query_started request_id=%s db=%s", request_id, payload.db)
+    effective_attempt_budget = 1 + payload.max_retries
+    effective_settings = settings.model_copy(
+        update={
+            "top_k": payload.top_k,
+            "enable_fk_expansion": payload.fk_expansion,
+            "max_retries": effective_attempt_budget,
+            "disable_self_correction": payload.max_retries == 0,
+        }
+    )
+    logger.info(
+        "query_started request_id=%s db=%s top_k=%d fk_expansion=%s max_retries=%d",
+        request_id,
+        payload.db,
+        payload.top_k,
+        payload.fk_expansion,
+        payload.max_retries,
+    )
     internal_trace = InternalTrace(request_id=request_id, db=payload.db)
-    pipeline_kwargs: dict[str, object] = {"settings": settings}
+    pipeline_kwargs: dict[str, object] = {"settings": effective_settings}
     if "trace" in inspect.signature(run_pipeline).parameters:
         pipeline_kwargs["trace"] = internal_trace
     task = asyncio.create_task(
@@ -290,7 +306,7 @@ async def query(request: Request, payload: QueryRequest) -> QueryResult | JSONRe
     try:
         result = await asyncio.wait_for(
             asyncio.shield(task),
-            timeout=settings.provider_timeout_seconds * settings.max_retries,
+            timeout=settings.provider_timeout_seconds * effective_attempt_budget,
         )
     except Exception as error:
         elapsed_ms = (time.perf_counter() - started) * 1000

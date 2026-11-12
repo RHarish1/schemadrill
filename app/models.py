@@ -14,8 +14,37 @@ class AuthenticatedUser(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    question: str = Field(min_length=1)
-    db: str = Field(min_length=1, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    question: str = Field(
+        min_length=1,
+        description="The natural language question to translate to SQL.",
+    )
+    db: str = Field(
+        min_length=1,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+        description="The database identifier.",
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of relevant tables to retrieve for schema context. Max is 10.",
+    )
+    fk_expansion: bool = Field(
+        default=False,
+        description=(
+            "Whether to automatically expand one-hop foreign key relationships "
+            "during schema retrieval."
+        ),
+    )
+    max_retries: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description=(
+            "Maximum number of LLM self-correction retries if generated SQL fails "
+            "validation. Max is 3."
+        ),
+    )
 
 
 class PublicStageTrace(BaseModel):

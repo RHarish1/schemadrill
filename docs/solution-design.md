@@ -288,3 +288,25 @@ bill without needing user databases.
 - **Alternatives considered:** Keeping Default Setup and pushing empty commits until GitHub's
   `2.27.4` CDN recovered (rejected: flaky, unrepeatable, and Python-only); scanning Python only
   in `codeql.yml` (rejected: misses `frontend/src` and `.github/workflows`).
+
+## 14. Per-request retrieval & retry tuning parameters (shipped in v0.4.0)
+
+- **Decision:** Expose optional bounded tuning parameters on `QueryRequest` (`top_k: int = 3`
+  with `1 <= top_k <= 10`, `fk_expansion: bool = False`, and `max_retries: int = 1` with
+  `0 <= max_retries <= 3`) and surface them in the authenticated frontend UI (`top_k` dropdown
+  `1..5` with tradeoff tooltip, `max_retries` dropdown `0..3`, and `fk_expansion` switch).
+  In `POST /query`, these map to a request-scoped `Settings` copy (`model_copy(update=...)`)
+  where `effective_attempt_budget = 1 + payload.max_retries` and `disable_self_correction =
+  (payload.max_retries == 0)`, and the request timeout scales with
+  `provider_timeout_seconds * effective_attempt_budget`.
+- **Why:** Users querying simple tables can trade down to `top_k=1..2`, `fk_expansion=false`, and
+  `max_retries=0` for lower latency and token usage, while complex multi-table analytical queries
+  can opt into higher `top_k`, one-hop FK expansion, and up to 3 self-correction retries.
+  `Settings.max_retries` historically represents the total attempt budget in `run_pipeline()`
+  and `evaluation/`, so translating `QueryRequest.max_retries` into `1 + payload.max_retries`
+  at the HTTP boundary gives API consumers standard retry-count semantics (`0` = no retries,
+  matching `execution_trace.retry_count`) without breaking existing pipeline or evaluation
+  contracts.
+- **Alternatives considered:** Renaming `Settings.max_retries` across `app/` and `evaluation/`
+  (rejected: unnecessary churn across tests and benchmark configs); allowing unbounded `top_k` or
+  `max_retries` in `QueryRequest` (rejected: risks token/latency abuse).

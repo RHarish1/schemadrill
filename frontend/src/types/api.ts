@@ -1,6 +1,9 @@
 export interface QueryRequest {
   db: string;
   question: string;
+  top_k?: number;
+  fk_expansion?: boolean;
+  max_retries?: number;
 }
 
 export interface DatasetOption {

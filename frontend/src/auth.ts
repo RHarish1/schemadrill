@@ -131,6 +131,9 @@ export async function signOutUser(): Promise<void> {
 export interface DraftQuery {
   question: string;
   dataset: string;
+  topK?: number;
+  fkExpansion?: boolean;
+  maxRetries?: number;
 }
 
 export function saveDraftQuery(draft: DraftQuery): void {
@@ -140,7 +143,13 @@ export function saveDraftQuery(draft: DraftQuery): void {
   try {
     window.sessionStorage.setItem(
       DRAFT_QUERY_STORAGE_KEY,
-      JSON.stringify({ question: draft.question, dataset: draft.dataset }),
+      JSON.stringify({
+        question: draft.question,
+        dataset: draft.dataset,
+        ...(typeof draft.topK === "number" ? { topK: draft.topK } : {}),
+        ...(typeof draft.fkExpansion === "boolean" ? { fkExpansion: draft.fkExpansion } : {}),
+        ...(typeof draft.maxRetries === "number" ? { maxRetries: draft.maxRetries } : {}),
+      }),
     );
   } catch {
     // Ignore sessionStorage failures.
@@ -157,6 +166,9 @@ export function consumeDraftQuery(): DraftQuery | null {
     return {
       question: typeof parsed.question === "string" ? parsed.question : "",
       dataset: typeof parsed.dataset === "string" ? parsed.dataset : "",
+      ...(typeof parsed.topK === "number" ? { topK: parsed.topK } : {}),
+      ...(typeof parsed.fkExpansion === "boolean" ? { fkExpansion: parsed.fkExpansion } : {}),
+      ...(typeof parsed.maxRetries === "number" ? { maxRetries: parsed.maxRetries } : {}),
     };
   } catch {
     return null;

@@ -40,9 +40,14 @@ function sendAuthenticatedFetch(
   });
 }
 
-async function request<T>(path: string, init?: RequestInit, includeAuth = true): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  includeAuth = true,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     let token: string | null = null;
     if (includeAuth) {
@@ -96,10 +101,17 @@ async function request<T>(path: string, init?: RequestInit, includeAuth = true):
 }
 
 export function queryDatabase(requestBody: QueryRequest) {
-  return request<QueryResult>("/query", {
-    method: "POST",
-    body: JSON.stringify(requestBody),
-  });
+  const maxRetries = requestBody.max_retries ?? 1;
+  const timeoutMs = Math.max(REQUEST_TIMEOUT_MS, (1 + maxRetries) * 35_000);
+  return request<QueryResult>(
+    "/query",
+    {
+      method: "POST",
+      body: JSON.stringify(requestBody),
+    },
+    true,
+    timeoutMs,
+  );
 }
 
 export function checkHealth() {

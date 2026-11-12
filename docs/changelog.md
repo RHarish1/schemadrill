@@ -25,6 +25,7 @@ Derived from `git log` (2026-09-26 to 2026-11-10). Hashes are abbreviated.
 | 11-10 | **v0.3.0**: **Execution Trace observability** — separate internal telemetry and sanitized public `execution_trace` API (including failed queries), plus collapsible React Execution Trace drawer | `54227fc` |
 | 11-10 | **v0.3.1**: **Read-only boundary hardening & trace detail breakdown** — full-AST rejection of mutation/DDL/locking/command nodes (including data-modifying CTEs, `SELECT ... INTO`, `FOR UPDATE`, `set_config`), `SELECT`-only `schemadrill_readonly` grants on tenant tables (`scripts/tenant.sql`), and `Show details` exposure of `top_k`, `fk_expansion`, independent validation check statuses (`read_only_policy`, `sql_syntax`, `dry_run`), and `execution_mode` | `5ba478c` |
 | 11-10 | **v0.3.2**: add repo-local `schemadrill-workflow` agent skill (`.agents/skills/`) covering ADRs, SemVer sync, verification, and commit standards | this commit |
+| 11-12 | **v0.4.0**: **Per-request query tuning (`top_k`, `fk_expansion`, `max_retries`)** — expose bounded optional `top_k` (`1..10`), `fk_expansion`, and `max_retries` (`0..3`) on authenticated `POST /query` (mapped to request-scoped `Settings` and `1 + max_retries` attempt budget), plus authenticated React query options (`top_k` 1–5 dropdown with tradeoff tooltip, `max_retries` 0–3 dropdown, `fk_expansion` switch, and draft/timeout alignment) | this commit |
 
 ## Feature inventory
 

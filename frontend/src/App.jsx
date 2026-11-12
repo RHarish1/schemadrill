@@ -20,10 +20,37 @@ import ExecutionTraceDrawer from "./components/ExecutionTraceDrawer";
 import "./styles.css";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
+const TOP_K_OPTIONS = [1, 2, 3, 4, 5];
+const MAX_RETRIES_OPTIONS = [0, 1, 2, 3];
+const DEFAULT_TOP_K = 3;
+const DEFAULT_FK_EXPANSION = false;
+const DEFAULT_MAX_RETRIES = 1;
+
+function clampInt(value, min, max, fallback) {
+  return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
 
 function getUserInitial(user) {
   const source = (user?.name || user?.email || "U").trim();
   return (source[0] || "U").toUpperCase();
+}
+
+function InfoTooltip({ id, label, text, align = "center" }) {
+  return (
+    <span className={`info-tip info-tip--${align}`}>
+      <button
+        type="button"
+        className="info-tip-btn"
+        aria-label={label}
+        aria-describedby={id}
+      >
+        i
+      </button>
+      <span role="tooltip" id={id} className="info-tip-popover">
+        {text}
+      </span>
+    </span>
+  );
 }
 
 function App() {
@@ -32,6 +59,11 @@ function App() {
   const [datasetsLoading, setDatasetsLoading] = useState(false);
   const [dataset, setDataset] = useState(initialDraft?.dataset || "");
   const [question, setQuestion] = useState(initialDraft?.question || "");
+  const [topK, setTopK] = useState(() => clampInt(initialDraft?.topK, 1, 5, DEFAULT_TOP_K));
+  const [fkExpansion, setFkExpansion] = useState(() => Boolean(initialDraft?.fkExpansion));
+  const [maxRetries, setMaxRetries] = useState(() =>
+    clampInt(initialDraft?.maxRetries, 0, 3, DEFAULT_MAX_RETRIES),
+  );
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -133,6 +165,9 @@ function App() {
         setUser(null);
         setDatasets([]);
         setDataset("");
+        setTopK(DEFAULT_TOP_K);
+        setFkExpansion(DEFAULT_FK_EXPANSION);
+        setMaxRetries(DEFAULT_MAX_RETRIES);
         setResult(null);
         setError(null);
         setSessionExpired(false);
@@ -222,7 +257,7 @@ function App() {
       return;
     }
     if (signingIn) return;
-    saveDraftQuery({ question, dataset });
+    saveDraftQuery({ question, dataset, topK, fkExpansion, maxRetries });
     setSigningIn(true);
     setAuthError(null);
     try {
@@ -256,6 +291,9 @@ function App() {
       setUser(null);
       setDatasets([]);
       setDataset("");
+      setTopK(DEFAULT_TOP_K);
+      setFkExpansion(DEFAULT_FK_EXPANSION);
+      setMaxRetries(DEFAULT_MAX_RETRIES);
       setResult(null);
       setError(null);
       setSessionExpired(false);
@@ -276,7 +314,13 @@ function App() {
     setError(null);
     setResult(null);
     try {
-      const payload = await queryDatabase({ db: dataset, question: cleanQuestion });
+      const payload = await queryDatabase({
+        db: dataset,
+        question: cleanQuestion,
+        top_k: topK,
+        fk_expansion: fkExpansion,
+        max_retries: maxRetries,
+      });
       if (payload.status === "failed") {
         setError({
           message: payload.reason || "The query could not be executed.",
@@ -447,6 +491,91 @@ function App() {
               onKeyDown={handleKeyDown} placeholder="Ask a question about your data..." rows="5" required />
             <div className="suggestions"><span>Try an example</span>
               {(selectedDataset?.examples || []).map((example) => <button type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}
+            </div>
+            <div className="query-settings" aria-label="Query tuning options">
+              <div className="query-settings-head">
+                <span className="block-label">Query options</span>
+                {!session && <span className="query-settings-lock">Sign in to customize</span>}
+              </div>
+              <div className="query-settings-grid">
+                <div className="setting-field">
+                  <div className="setting-label-row">
+                    <label htmlFor="top-k">Top-k</label>
+                    <InfoTooltip
+                      id="top-k-tooltip"
+                      label="Explain top-k tradeoffs"
+                      align="left"
+                      text="Tables retrieved for SQL context. Low k (1–2) is faster with fewer tokens but may miss tables; high k (4–5) improves multi-table recall at higher latency and token cost."
+                    />
+                  </div>
+                  <select
+                    id="top-k"
+                    value={topK}
+                    onChange={(event) => setTopK(Number(event.target.value))}
+                    disabled={!session || loading}
+                  >
+                    {TOP_K_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {value === DEFAULT_TOP_K ? `${value} (default)` : value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="setting-field">
+                  <div className="setting-label-row">
+                    <label htmlFor="max-retries">Max retries</label>
+                    <InfoTooltip
+                      id="max-retries-tooltip"
+                      label="Explain max retries tradeoffs"
+                      align="center"
+                      text="LLM self-correction retries on SQL validation failure. 0 is fastest; higher values (1–3) improve recovery at added latency."
+                    />
+                  </div>
+                  <select
+                    id="max-retries"
+                    value={maxRetries}
+                    onChange={(event) => setMaxRetries(Number(event.target.value))}
+                    disabled={!session || loading}
+                  >
+                    {MAX_RETRIES_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {value === DEFAULT_MAX_RETRIES
+                          ? `${value} (default)`
+                          : value === 0
+                            ? "0 (none)"
+                            : value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="setting-field">
+                  <div className="setting-label-row">
+                    <span className="setting-label-text" id="fk-expansion-label">FK expansion</span>
+                    <InfoTooltip
+                      id="fk-expansion-tooltip"
+                      label="Explain foreign key expansion"
+                      align="right"
+                      text="Include one-hop foreign-key neighbor tables automatically. Helps multi-table joins at slightly higher retrieval latency."
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={fkExpansion}
+                    aria-labelledby="fk-expansion-label"
+                    className={`toggle-switch ${fkExpansion ? "is-enabled" : ""}`}
+                    onClick={() => setFkExpansion((prev) => !prev)}
+                    disabled={!session || loading}
+                  >
+                    <span className="toggle-track" aria-hidden="true">
+                      <span className="toggle-thumb" />
+                    </span>
+                    <span className="toggle-text">{fkExpansion ? "Enabled" : "Disabled"}</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <button className="run-button" type="submit" disabled={loading || !question.trim() || !session || !dataset}>
               {loading ? <><span className="spinner" /> Running query...</> : <>Run query <b>↗</b></>}
