@@ -4,6 +4,8 @@ import {
   checkHealth,
   getCurrentUser,
   listDatasets,
+  listDbConnections,
+  onInvalidDbCreds,
   onInvalidLlmKey,
   onRateLimitRemaining,
   queryDatabase,
@@ -18,7 +20,9 @@ import {
   saveDraftQuery,
   signOutUser,
 } from "./auth";
+import { clearAllDbCredentials, hasDbCredential, onDbCredsChange } from "./dbCreds";
 import { clearLlmKey, getKeyLast4, getSelectedLlmModel, onLlmKeyChange } from "./llmKey";
+import ConnectionsModal from "./components/ConnectionsModal";
 import ExecutionTraceDrawer from "./components/ExecutionTraceDrawer";
 import SettingsModal from "./components/SettingsModal";
 import "./styles.css";
@@ -82,23 +86,62 @@ function App() {
   const [avatarBroken, setAvatarBroken] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialError, setSettingsInitialError] = useState(null);
+  const [connections, setConnections] = useState([]);
+  const [selectedSchema, setSelectedSchema] = useState("");
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [connectionsActionHint, setConnectionsActionHint] = useState(null);
   const [rateLimitRemaining, setRateLimitRemaining] = useState(null);
   const [, setLlmKeyVersion] = useState(0);
+  const [dbCredsVersion, setDbCredsVersion] = useState(0);
   const hadActiveSessionRef = useRef(false);
 
   const keyLast4 = getKeyLast4();
   const activeByokModel = getSelectedLlmModel();
   const usingByok = Boolean(keyLast4);
 
-  const selectedDataset = datasets.find((item) => item.id === dataset);
+  const selectedConnectionId = dataset.startsWith("conn:") ? dataset.slice(5) : null;
+  const selectedConnection = selectedConnectionId
+    ? connections.find((item) => item.id === selectedConnectionId) || null
+    : null;
+  const selectedDataset = selectedConnection
+    ? null
+    : datasets.find((item) => item.id === dataset);
   const signedInUserId = user?.id || (session ? "authenticated" : "");
+
+  const connectionBlockReason = useMemo(() => {
+    void dbCredsVersion;
+    if (!selectedConnection) return null;
+    if (selectedConnection.ingest_status === "running") {
+      return "Schema ingest is still running. Wait for it to finish before querying.";
+    }
+    if (selectedConnection.ingest_status !== "ready") {
+      return "Connection ingest failed or is not ready. Re-ingest in Databases before querying.";
+    }
+    const isExpired =
+      Boolean(selectedConnection.expires_at) &&
+      new Date(selectedConnection.expires_at).getTime() <= Date.now();
+    if (isExpired) {
+      return "Schema cache expired. Re-ingest this connection in Databases.";
+    }
+    if (!hasDbCredential(selectedConnection.id)) {
+      return "Session credentials are missing in this tab. Reconnect in Databases to query.";
+    }
+    if (!selectedSchema) {
+      return "Select a schema to query.";
+    }
+    return null;
+  }, [selectedConnection, selectedSchema]);
+
+  const isQueryBlocked = !dataset || Boolean(connectionBlockReason);
 
   const markSessionExpired = useCallback(() => {
     hadActiveSessionRef.current = false;
     setSession(null);
     setUser(null);
     setDatasets([]);
+    setConnections([]);
     setDataset("");
+    setSelectedSchema("");
     setSessionExpired(true);
     setAuthError(null);
   }, []);
@@ -173,11 +216,15 @@ function App() {
     const unsubscribeCrossTab = onCrossTabAuthEvent((eventType) => {
       if (eventType === "SIGNED_OUT") {
         clearLlmKey();
+        clearAllDbCredentials();
         hadActiveSessionRef.current = false;
         setSession(null);
         setUser(null);
         setDatasets([]);
+        setConnections([]);
         setDataset("");
+        setSelectedSchema("");
+        setConnectionsOpen(false);
         setTopK(DEFAULT_TOP_K);
         setFkExpansion(DEFAULT_FK_EXPANSION);
         setMaxRetries(DEFAULT_MAX_RETRIES);
@@ -195,9 +242,19 @@ function App() {
     const unsubscribeLlmKey = onLlmKeyChange(() => {
       setLlmKeyVersion((v) => v + 1);
     });
+    const unsubscribeDbCreds = onDbCredsChange(() => {
+      setDbCredsVersion((v) => v + 1);
+    });
     const unsubscribeInvalidKey = onInvalidLlmKey((detail) => {
       setSettingsInitialError(detail);
       setSettingsOpen(true);
+    });
+    const unsubscribeInvalidDbCreds = onInvalidDbCreds(({ connectionId, message }) => {
+      setConnectionsActionHint({
+        connectionId,
+        mode: "reconnect",
+        message: message || "Your database credentials were rejected. Update them to continue.",
+      });
     });
     const unsubscribeRateLimit = onRateLimitRemaining((remaining) => {
       setRateLimitRemaining(remaining);
@@ -206,7 +263,9 @@ function App() {
       unsubscribeExpired();
       unsubscribeCrossTab();
       unsubscribeLlmKey();
+      unsubscribeDbCreds();
       unsubscribeInvalidKey();
+      unsubscribeInvalidDbCreds();
       unsubscribeRateLimit();
     };
   }, [applyAuthenticatedSession, markSessionExpired]);
@@ -238,28 +297,65 @@ function App() {
     };
   }, [revalidateSession, session]);
 
+  const refreshConnections = useCallback(async () => {
+    if (!signedInUserId) return;
+    try {
+      const nextConnections = await listDbConnections();
+      setConnections(nextConnections);
+      setDataset((currentDataset) => {
+        if (currentDataset.startsWith("conn:")) {
+          const cid = currentDataset.slice(5);
+          if (nextConnections.some((item) => item.id === cid)) return currentDataset;
+          return datasets[0]?.id || (nextConnections[0] ? `conn:${nextConnections[0].id}` : "");
+        }
+        return currentDataset;
+      });
+    } catch {
+      // Keep existing connections list if background refresh fails
+    }
+  }, [signedInUserId, datasets]);
+
+  useEffect(() => {
+    if (!selectedConnection) {
+      setSelectedSchema("");
+      return;
+    }
+    const availableSchemas = selectedConnection.schemas || [];
+    setSelectedSchema((currentSchema) =>
+      availableSchemas.includes(currentSchema) ? currentSchema : availableSchemas[0] || "",
+    );
+  }, [selectedConnection]);
+
   useEffect(() => {
     if (!signedInUserId) {
       setDatasets([]);
+      setConnections([]);
       setDatasetsLoading(false);
       return;
     }
     let cancelled = false;
     setDatasetsLoading(true);
-    Promise.allSettled([listDatasets(), getCurrentUser()])
-      .then(([datasetsResult, profileResult]) => {
+    Promise.allSettled([listDatasets(), listDbConnections(), getCurrentUser()])
+      .then(([datasetsResult, connectionsResult, profileResult]) => {
         if (cancelled) return;
-        if (datasetsResult.status === "fulfilled") {
-          const availableDatasets = datasetsResult.value.datasets;
-          setDatasets(availableDatasets);
-          setDataset((currentDataset) =>
-            availableDatasets.some((item) => item.id === currentDataset)
-              ? currentDataset
-              : availableDatasets[0]?.id || "",
+        const availableDatasets =
+          datasetsResult.status === "fulfilled" ? datasetsResult.value.datasets : [];
+        const availableConnections =
+          connectionsResult.status === "fulfilled" ? connectionsResult.value : [];
+        setDatasets(availableDatasets);
+        setConnections(availableConnections);
+        setDataset((currentDataset) => {
+          if (currentDataset.startsWith("conn:")) {
+            const cid = currentDataset.slice(5);
+            if (availableConnections.some((item) => item.id === cid)) return currentDataset;
+          } else if (availableDatasets.some((item) => item.id === currentDataset)) {
+            return currentDataset;
+          }
+          return (
+            availableDatasets[0]?.id ||
+            (availableConnections[0] ? `conn:${availableConnections[0].id}` : "")
           );
-        } else {
-          setDatasets([]);
-        }
+        });
         if (profileResult.status === "fulfilled" && profileResult.value) {
           const profile = profileResult.value;
           setUser((currentUser) => ({
@@ -314,10 +410,14 @@ function App() {
     try {
       await signOutUser();
     } finally {
+      clearAllDbCredentials();
       setSession(null);
       setUser(null);
       setDatasets([]);
+      setConnections([]);
       setDataset("");
+      setSelectedSchema("");
+      setConnectionsOpen(false);
       setTopK(DEFAULT_TOP_K);
       setFkExpansion(DEFAULT_FK_EXPANSION);
       setMaxRetries(DEFAULT_MAX_RETRIES);
@@ -336,21 +436,34 @@ function App() {
       setAuthError("Sign in with Google to run queries.");
       return;
     }
-    if (!dataset) return;
+    if (isQueryBlocked) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const payload = await queryDatabase({
-        db: dataset,
-        question: cleanQuestion,
-        top_k: topK,
-        fk_expansion: fkExpansion,
-        max_retries: maxRetries,
-      });
+      const requestBody = selectedConnection
+        ? {
+            db: selectedSchema,
+            connection_id: selectedConnection.id,
+            question: cleanQuestion,
+            top_k: topK,
+            fk_expansion: fkExpansion,
+            max_retries: maxRetries,
+          }
+        : {
+            db: dataset,
+            question: cleanQuestion,
+            top_k: topK,
+            fk_expansion: fkExpansion,
+            max_retries: maxRetries,
+          };
+      const payload = await queryDatabase(requestBody);
       if (payload.status === "failed") {
         setError({
           message: payload.reason || "The query could not be executed.",
+          hintCode: payload.hint_code || undefined,
+          hintMessage: payload.hint_message || undefined,
+          connectionId: selectedConnection?.id || undefined,
           details: payload,
           executionTrace: payload.execution_trace || null,
         });
@@ -359,7 +472,9 @@ function App() {
         setResult({
           ...payload,
           question: cleanQuestion,
-          dataset: selectedDataset?.label || dataset,
+          dataset: selectedConnection
+            ? `${selectedConnection.label} (${selectedSchema})`
+            : selectedDataset?.label || dataset,
         });
       }
     } catch (requestError) {
@@ -369,7 +484,9 @@ function App() {
       setError({
         message:
           requestError instanceof ApiRequestError ? requestError.message : "Something went wrong.",
+        status: requestError instanceof ApiRequestError ? requestError.status : undefined,
         code: requestError instanceof ApiRequestError ? requestError.code : undefined,
+        connectionId: selectedConnection?.id || undefined,
         details:
           requestError instanceof ApiRequestError ? requestError.technicalDetails : undefined,
         executionTrace:
@@ -436,6 +553,18 @@ function App() {
               disabled={signingIn}
             >
               {signingIn ? "Redirecting..." : "Sign in with Google"}
+            </button>
+          )}
+          {session && (
+            <button
+              type="button"
+              className="nav-databases-btn"
+              onClick={() => {
+                setConnectionsActionHint(null);
+                setConnectionsOpen(true);
+              }}
+            >
+              Databases{connections.length ? ` (${connections.length})` : ""}
             </button>
           )}
           {session && (
@@ -520,12 +649,27 @@ function App() {
               id="dataset"
               value={dataset}
               onChange={(event) => setDataset(event.target.value)}
-              disabled={!datasets.length}
+              disabled={!datasets.length && !connections.length}
             >
-              {datasets.length ? (
-                datasets.map((item) => (
-                  <option value={item.id} key={item.id}>{item.label} — {item.description}</option>
-                ))
+              {datasets.length || connections.length ? (
+                <>
+                  {datasets.length > 0 && (
+                    <optgroup label="Demo datasets">
+                      {datasets.map((item) => (
+                        <option value={item.id} key={item.id}>{item.label} — {item.description}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {connections.length > 0 && (
+                    <optgroup label="Your Neon connections">
+                      {connections.map((conn) => (
+                        <option value={`conn:${conn.id}`} key={conn.id}>
+                          {conn.label} ({conn.database}) — {conn.ingest_status}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </>
               ) : (
                 <option value="">
                   {!session
@@ -536,6 +680,43 @@ function App() {
                 </option>
               )}
             </select>
+            {selectedConnection && (
+              <div className="connection-picker-extras">
+                <label htmlFor="db-schema">Schema</label>
+                <select
+                  id="db-schema"
+                  value={selectedSchema}
+                  onChange={(event) => setSelectedSchema(event.target.value)}
+                  disabled={!selectedConnection.schemas?.length}
+                >
+                  {selectedConnection.schemas?.length ? (
+                    selectedConnection.schemas.map((schemaName) => (
+                      <option value={schemaName} key={schemaName}>{schemaName}</option>
+                    ))
+                  ) : (
+                    <option value="">No schemas</option>
+                  )}
+                </select>
+                {connectionBlockReason && (
+                  <div className="connection-status-hint" role="status">
+                    <span>{connectionBlockReason}</span>
+                    <button
+                      type="button"
+                      className="link-action-btn"
+                      onClick={() => {
+                        setConnectionsActionHint({
+                          connectionId: selectedConnection.id,
+                          mode: "reconnect",
+                        });
+                        setConnectionsOpen(true);
+                      }}
+                    >
+                      Open Databases
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <label htmlFor="question">What do you want to know?</label>
             <textarea id="question" value={question} onChange={(event) => setQuestion(event.target.value)}
               onKeyDown={handleKeyDown} placeholder="Ask a question about your data..." rows="5" required />
@@ -627,7 +808,7 @@ function App() {
                 </div>
               </div>
             </div>
-            <button className="run-button" type="submit" disabled={loading || !question.trim() || !session || !dataset}>
+            <button className="run-button" type="submit" disabled={loading || !question.trim() || !session || isQueryBlocked}>
               {loading ? <><span className="spinner" /> Running query...</> : <>Run query <b>↗</b></>}
             </button>
             <p className="shortcut">Press <kbd>Ctrl</kbd><span>↵</span> or <kbd>⌘</kbd><span>↵</span> to run</p>
@@ -653,6 +834,11 @@ function App() {
             sessionExpired={sessionExpired}
             signingIn={signingIn}
             onSignIn={signIn}
+            onRetryQuery={() => submitQuery()}
+            onOpenConnections={(hint) => {
+              setConnectionsActionHint(hint || null);
+              setConnectionsOpen(true);
+            }}
             onOpenSettings={() => {
               setSettingsInitialError(null);
               setSettingsOpen(true);
@@ -665,12 +851,36 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         initialError={settingsInitialError}
       />
+      <ConnectionsModal
+        open={connectionsOpen}
+        onClose={() => {
+          setConnectionsOpen(false);
+          setConnectionsActionHint(null);
+        }}
+        connections={connections}
+        onConnectionsChanged={(nextId) => {
+          refreshConnections();
+          if (nextId) setDataset(`conn:${nextId}`);
+        }}
+        initialReconnectId={connectionsActionHint?.connectionId || null}
+        initialError={connectionsActionHint?.message || null}
+      />
       <footer><span>SchemaDrill <b>·</b> Safe by design</span><span>Queries are bounded and read-only</span></footer>
     </div>
   );
 }
 
-function ResultsPanel({ loading, result, error, sessionExpired, signingIn, onSignIn, onOpenSettings }) {
+function ResultsPanel({
+  loading,
+  result,
+  error,
+  sessionExpired,
+  signingIn,
+  onSignIn,
+  onRetryQuery,
+  onOpenConnections,
+  onOpenSettings,
+}) {
   if (loading) return <section className="answer-panel centered"><span className="loader" /><h2>Working on it...</h2><p>Generating and validating a read-only query.</p></section>;
   if (sessionExpired && !result) {
     return (
@@ -692,20 +902,89 @@ function ResultsPanel({ loading, result, error, sessionExpired, signingIn, onSig
     );
   }
   if (error) {
+    const isByokError =
+      error.code === "free_tier_exhausted" || error.code === "byok_required";
+    const isRejectedCreds = error.code === "db_credentials_rejected";
+    const isReconnectError =
+      error.code === "db_credentials_required" || error.code === "connection_mismatch";
+    const isStaleSchema =
+      error.code === "schema_stale" || error.hintCode === "schema_maybe_stale";
+    const isTransientDbError = error.status === 503 || error.status === 504;
+
     return (
       <section className={`answer-panel centered error-state ${error.executionTrace ? "has-trace" : ""}`}>
         <span className="error-icon">!</span>
         <h2>Couldn’t run that query</h2>
         <p>{error.message}</p>
-        {error.code === "free_tier_exhausted" && (
-          <button
-            className="panel-action-btn"
-            type="button"
-            onClick={onOpenSettings}
-          >
-            Add Gemini API key
-          </button>
+        {error.hintMessage && <p className="error-hint">{error.hintMessage}</p>}
+        {isTransientDbError && (
+          <p className="error-hint">
+            Your Neon database may be waking up from suspend or blocking connections via IP Allow. Wait a moment and retry.
+          </p>
         )}
+        <div className="error-actions">
+          {isByokError && (
+            <button
+              className="panel-action-btn"
+              type="button"
+              onClick={onOpenSettings}
+            >
+              Add Gemini API key
+            </button>
+          )}
+          {isRejectedCreds && (
+            <button
+              className="panel-action-btn"
+              type="button"
+              onClick={() =>
+                onOpenConnections({
+                  connectionId: error.connectionId,
+                  mode: "reconnect",
+                  message: "Update your database credentials to continue.",
+                })
+              }
+            >
+              Update credentials
+            </button>
+          )}
+          {isReconnectError && (
+            <button
+              className="panel-action-btn"
+              type="button"
+              onClick={() =>
+                onOpenConnections({
+                  connectionId: error.connectionId,
+                  mode: "reconnect",
+                })
+              }
+            >
+              Reconnect database
+            </button>
+          )}
+          {isStaleSchema && (
+            <button
+              className="panel-action-btn"
+              type="button"
+              onClick={() =>
+                onOpenConnections({
+                  connectionId: error.connectionId,
+                  mode: "reingest",
+                })
+              }
+            >
+              Re-ingest schema
+            </button>
+          )}
+          {isTransientDbError && (
+            <button
+              className="panel-action-btn"
+              type="button"
+              onClick={onRetryQuery}
+            >
+              Retry query
+            </button>
+          )}
+        </div>
         {error.executionTrace ? (
           <ExecutionTraceDrawer trace={error.executionTrace} defaultOpen={true} />
         ) : (
@@ -729,6 +1008,8 @@ function Result({ result }) {
   const [copied, setCopied] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const sql = result.sql || "";
+  const isChangeScript = result.kind === "change_script" || result.executed === false;
+  const warnings = result.warnings || [];
   const csv = useMemo(() => [columns, ...rows.map((row) => columns.map((column) => row[column]))]
     .map((line) => line.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n"), [columns, rows]);
 
@@ -745,6 +1026,43 @@ function Result({ result }) {
     link.download = "schemadrill-results.csv";
     link.click();
     URL.revokeObjectURL(link.href);
+  }
+
+  if (isChangeScript) {
+    return (
+      <section className="answer-panel result-panel change-script-card">
+        <div className="answer-heading">
+          <div>
+            <span className="change-script-label"><i /> CHANGE SCRIPT · NOT EXECUTED</span>
+            <h2>Review SQL before running</h2>
+          </div>
+          <span className="attempts">{result.attempts} attempt{result.attempts === 1 ? "" : "s"}</span>
+        </div>
+        <p className="change-script-notice">Not executed. Run it in the Neon SQL Editor.</p>
+        {warnings.length > 0 && (
+          <div className="change-script-warnings" role="alert">
+            <strong>Warnings</strong>
+            <ul>
+              {warnings.map((warning, idx) => (
+                <li key={idx}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="sql-heading">
+          <span className="block-label">GENERATED CHANGE SCRIPT</span>
+          <button onClick={copySql} disabled={!sql}>{copied ? "Copied" : "Copy SQL"}</button>
+        </div>
+        <pre className="sql">{sql || "SQL was not returned by the API."}</pre>
+        {result.execution_trace && (
+          <ExecutionTraceDrawer
+            trace={result.execution_trace}
+            dataset={result.dataset || "user_db"}
+            defaultOpen={false}
+          />
+        )}
+      </section>
+    );
   }
 
   return <section className="answer-panel result-panel">

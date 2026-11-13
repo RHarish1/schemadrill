@@ -1,13 +1,17 @@
 import type {
+  CreateConnectionRequest,
   DatasetCatalogResponse,
   ExecutionTrace,
+  InspectConnectionResponse,
   LlmProvider,
   QueryRequest,
   QueryResult,
+  TenantConnectionSummary,
   UserProfile,
   ValidateKeyResponse,
 } from "../types/api";
 import { authClient, getAuthToken, notifySessionExpired } from "../auth";
+import { clearDbCredential, getDbCredential } from "../dbCreds";
 import {
   clearLlmKey,
   getLlmApiKey,
@@ -21,6 +25,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const SESSION_EXPIRED_MESSAGE = "Your session expired. Sign in with Google to continue.";
 
 const invalidLlmKeyListeners = new Set<(detail: string) => void>();
+const invalidDbCredsListeners = new Set<(detail: string, connectionId?: string) => void>();
 const rateLimitRemainingListeners = new Set<(remaining: number) => void>();
 
 export function onInvalidLlmKey(listener: (detail: string) => void): () => void {
@@ -33,6 +38,21 @@ export function onInvalidLlmKey(listener: (detail: string) => void): () => void 
 function notifyInvalidLlmKey(detail: string): void {
   for (const listener of invalidLlmKeyListeners) {
     listener(detail);
+  }
+}
+
+export function onInvalidDbCreds(
+  listener: (detail: string, connectionId?: string) => void,
+): () => void {
+  invalidDbCredsListeners.add(listener);
+  return () => {
+    invalidDbCredsListeners.delete(listener);
+  };
+}
+
+function notifyInvalidDbCreds(detail: string, connectionId?: string): void {
+  for (const listener of invalidDbCredsListeners) {
+    listener(detail, connectionId);
   }
 }
 
@@ -85,6 +105,7 @@ async function request<T>(
   init?: RequestInit,
   includeAuth = true,
   timeoutMs = REQUEST_TIMEOUT_MS,
+  connectionId?: string,
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -142,6 +163,12 @@ async function request<T>(
         clearLlmKey();
         notifyInvalidLlmKey(detail);
       }
+      if (response.status === 403 && code === "db_credentials_rejected") {
+        if (connectionId) {
+          clearDbCredential(connectionId);
+        }
+        notifyInvalidDbCreds(detail, connectionId);
+      }
 
       throw new ApiRequestError(
         detail,
@@ -184,6 +211,12 @@ export function queryDatabase(requestBody: QueryRequest) {
       body.fallback_model = selectedFallback;
     }
   }
+  if (requestBody.connection_id) {
+    const dbUrl = getDbCredential(requestBody.connection_id);
+    if (dbUrl) {
+      headers["X-DB-Url"] = encodeURIComponent(dbUrl);
+    }
+  }
 
   return request<QueryResult>(
     "/query",
@@ -194,7 +227,67 @@ export function queryDatabase(requestBody: QueryRequest) {
     },
     true,
     timeoutMs,
+    requestBody.connection_id,
   );
+}
+
+export function inspectDbConnection(dbUrl: string) {
+  return request<InspectConnectionResponse>(
+    "/api/connections/inspect",
+    {
+      method: "POST",
+      headers: {
+        "X-DB-Url": encodeURIComponent(dbUrl.trim()),
+      },
+    },
+    true,
+    25_000,
+  );
+}
+
+export function createDbConnection(dbUrl: string, payload: CreateConnectionRequest) {
+  return request<TenantConnectionSummary>(
+    "/api/connections",
+    {
+      method: "POST",
+      headers: {
+        "X-DB-Url": encodeURIComponent(dbUrl.trim()),
+      },
+      body: JSON.stringify(payload),
+    },
+    true,
+    70_000,
+  );
+}
+
+export function listDbConnections() {
+  return request<TenantConnectionSummary[]>("/api/connections");
+}
+
+export function reingestDbConnection(connectionId: string, dbUrl: string) {
+  return request<TenantConnectionSummary>(
+    `/api/connections/${encodeURIComponent(connectionId)}/reingest`,
+    {
+      method: "POST",
+      headers: {
+        "X-DB-Url": encodeURIComponent(dbUrl.trim()),
+      },
+    },
+    true,
+    70_000,
+    connectionId,
+  );
+}
+
+export async function deleteDbConnection(connectionId: string) {
+  const res = await request<{ ok: boolean }>(
+    `/api/connections/${encodeURIComponent(connectionId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+  clearDbCredential(connectionId);
+  return res;
 }
 
 export function validateLlmKey(apiKey: string, provider: LlmProvider = "gemini") {

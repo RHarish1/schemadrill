@@ -1,5 +1,6 @@
 import { createAuthClient } from "@neondatabase/auth";
 import { BetterAuthReactAdapter } from "@neondatabase/auth/react/adapters";
+import { clearAllDbCredentials } from "./dbCreds";
 import { clearLlmKey } from "./llmKey";
 
 const authUrl = import.meta.env.VITE_NEON_AUTH_URL;
@@ -123,6 +124,7 @@ export async function getAuthToken(options?: { forceRefresh?: boolean }): Promis
 export async function signOutUser(): Promise<void> {
   clearDraftQuery();
   clearLlmKey();
+  clearAllDbCredentials();
   try {
     await authClient?.signOut();
   } finally {
