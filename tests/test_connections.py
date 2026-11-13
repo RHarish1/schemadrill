@@ -179,6 +179,36 @@ def test_parse_and_validate_db_url_rejects_cgnat_dns(monkeypatch):
     assert "carrier-grade NAT address" in str(exc_info.value)
 
 
+def test_parse_and_validate_db_url_prefers_ipv4_over_ipv6(monkeypatch):
+    import socket
+
+    url = "postgresql://user:pass@ep-cool.us-east-2.aws.neon.tech/db"
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2600:1f14:abcd::1", 5432, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("54.148.10.20", 5432)),
+        ],
+    )
+    info = parse_and_validate_db_url(SecretStr(url))
+    assert info.resolved_ip == "54.148.10.20"
+
+
+def test_parse_and_validate_db_url_still_rejects_private_ipv6_when_ipv4_present(monkeypatch):
+    import socket
+
+    url = "postgresql://user:pass@ep-cool.us-east-2.aws.neon.tech/db"
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 5432, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("54.148.10.20", 5432)),
+        ],
+    )
+    with pytest.raises(CredentialsError):
+        parse_and_validate_db_url(SecretStr(url))
+
+
 # ---------------------------------------------------------------------------
 # 3. Read-Only Privilege Checks
 # ---------------------------------------------------------------------------

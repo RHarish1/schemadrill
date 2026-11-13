@@ -199,13 +199,15 @@ def parse_and_validate_db_url(
             code="user_db_unreachable",
         )
 
-    # Validate EVERY resolved IP
+    # Validate EVERY resolved IP (IPv4 and IPv6)
     resolved_ips = [info[4][0] for info in addr_infos]
     for ip_str in resolved_ips:
         _check_ip_allowed(ip_str, allow_private=allow_private)
 
-    # Pick the first resolved IP for hostaddr pinning
-    pinned_ip = resolved_ips[0]
+    # Prefer IPv4 (AF_INET) for hostaddr pinning because serverless runtimes
+    # like Cloud Run often lack outbound IPv6 routing and fail with ENETUNREACH.
+    ipv4_ips = [info[4][0] for info in addr_infos if info[0] == socket.AF_INET]
+    pinned_ip = ipv4_ips[0] if ipv4_ips else resolved_ips[0]
     is_pooler = "-pooler" in host.lower()
 
     return ParsedConnectionInfo(
