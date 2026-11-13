@@ -79,6 +79,10 @@ class InternalTrace:
     top_k: int | None = None
     fk_expansion: bool | None = None
     execution_mode: str = "read_only"
+    dataset_kind: Literal["demo", "user_db"] = "demo"
+    connection_id: str | None = None
+    user_db_connect_ms: float | None = None
+    intent: Literal["read", "change"] = "read"
 
     # Prompting telemetry
     prompt_construction_ms: float = 0.0
@@ -248,7 +252,8 @@ class InternalTrace:
         total_ms = self.finish()
         with self._lock:
             logger.info(
-                "pipeline_internal_telemetry request_id=%s db=%s status=%s "
+                "pipeline_internal_telemetry request_id=%s db=%s dataset_kind=%s "
+                "connection_id=%s intent=%s user_db_connect_ms=%s status=%s "
                 "total_duration_ms=%.2f embedding_ms=%s retrieved_tables=%s "
                 "similarity_scores=%s fk_added=%d prompt_ms=%.2f prompt_tokens=%s "
                 "request_chars=%d llm_provider=%s llm_model=%s llm_ms=%.2f "
@@ -258,6 +263,10 @@ class InternalTrace:
                 "rows_returned=%s execution_error_type=%s",
                 self.request_id,
                 self.db,
+                self.dataset_kind,
+                self.connection_id,
+                self.intent,
+                (f"{self.user_db_connect_ms:.2f}" if self.user_db_connect_ms is not None else None),
                 status,
                 total_ms,
                 (
@@ -333,6 +342,8 @@ def build_public_execution_trace(
             top_k=trace.top_k,
             fk_expansion=trace.fk_expansion,
             execution_mode=trace.execution_mode,
+            dataset_kind=trace.dataset_kind,
+            intent=trace.intent,
             tier=trace.tier,
             model=trace.model or None,
             fallback_used=trace.fallback_used,

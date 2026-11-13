@@ -9,6 +9,9 @@ from app.models import AuthenticatedUser
 
 _SCRIPTS_DIRECTORY = Path(__file__).resolve().parent.parent / "scripts"
 _TENANT_SCHEMA = (_SCRIPTS_DIRECTORY / "tenant.sql").read_text(encoding="utf-8")
+_TENANT_CONNECTIONS_SCHEMA = (_SCRIPTS_DIRECTORY / "tenant_connections.sql").read_text(
+    encoding="utf-8"
+)
 _DEFAULT_DATASET_SCRIPTS = (
     (_SCRIPTS_DIRECTORY / "load_demo_dbs.sql").read_text(encoding="utf-8"),
     (_SCRIPTS_DIRECTORY / "load_benchmark_datasets.sql").read_text(encoding="utf-8"),
@@ -42,6 +45,7 @@ def _ensure_tenant_schema(database_url: str) -> None:
         return
     with psycopg.connect(database_url) as connection:
         connection.execute(_TENANT_SCHEMA)
+        connection.execute(_TENANT_CONNECTIONS_SCHEMA)
         connection.commit()
 
 

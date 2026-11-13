@@ -28,9 +28,9 @@ flowchart TD
 | # | Feature | Status | Reality check against the code |
 | --- | --- | --- | --- |
 | 1 | **Google authentication** | **Shipped** | Neon Auth with Google, JWT verification, user record with email/display name capture, sign-out and session-expiry UX |
-| 2 | **Connect your Neon database** | Planned | Replaces "Neon authorization". Connection-string based, no OAuth. Not started |
-| 3 | **BYOK (multi-provider)** | Planned | Gemini key is a global setting today (`app/config.py`) |
-| 4 | **Run SQL through the website** | **Partly shipped** | Works on curated shared datasets. Remaining: run on the user's own database |
+| 2 | **Connect your Neon database** | **Phase 2a Shipped** | Session-held credentials via `X-DB-Url`, SSRF validation matrix, read-only check, exact schema vector store (`v0.6.0`). Phase 2b query execution pending |
+| 3 | **BYOK (multi-provider)** | **Phase 1 Shipped** | Browser-held keys (`sessionStorage`), multi-model fallback, sticky routing, rate limiting (`v0.5.0`) |
+| 4 | **Run SQL through the website** | **Partly shipped** | Works on curated shared datasets. Remaining: run on the user's own database (Phase 2b) |
 | 5 | **Search interface and dataset selector** | **Mostly shipped** | Dropdown and examples exist. Remaining: list the user's own databases |
 | 6 | **CSV / PDF export** | Partly shipped | CSV export is in the frontend. PDF is not started |
 | 7 | **CSV / Excel upload** | Planned | New tables first |

@@ -11,7 +11,7 @@ from email.utils import parsedate_to_datetime
 from threading import Lock
 from typing import Any, Literal, Protocol
 
-from app.config import get_active_llm_key, get_request_id
+from app.config import get_active_db_url, get_active_llm_key, get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,9 @@ _SECRET_PATTERNS = (
     re.compile(r"(Bearer\s+)[^\s\"']+", re.IGNORECASE),
     re.compile(r"\b(?:AIza|AQ\.)[A-Za-z0-9._-]{8,}"),
     re.compile(r"(://[^:/\s]+:)[^@/\s]+(@)"),
+    re.compile(r"postgres(?:ql)?://[^\s\"']+", re.IGNORECASE),
+    re.compile(r"password=[^\s&\"']+", re.IGNORECASE),
+    re.compile(r"X-DB-Url:\s*[^\s\"']+", re.IGNORECASE),
 )
 _INVALID_KEY_PHRASES = (
     "api key not valid",
@@ -168,6 +171,11 @@ def sanitize_log_detail(text: str | None) -> str | None:
         secret = active_key.get_secret_value()
         if secret and secret in line:
             line = line.replace(secret, "[REDACTED]")
+    active_db = get_active_db_url()
+    if active_db is not None:
+        db_secret = active_db.get_secret_value()
+        if db_secret and db_secret in line:
+            line = line.replace(db_secret, "[REDACTED]")
     for pattern in _SECRET_PATTERNS:
         if pattern.groups >= 2:
             line = pattern.sub(r"\1[REDACTED]\2", line)

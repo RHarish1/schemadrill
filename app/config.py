@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REQUEST_ID_VAR: ContextVar[str] = ContextVar("request_id", default="-")
 _ACTIVE_LLM_KEY_VAR: ContextVar[SecretStr | None] = ContextVar("active_llm_key", default=None)
+_ACTIVE_DB_URL_VAR: ContextVar[SecretStr | None] = ContextVar("active_db_url", default=None)
 
 
 def get_request_id() -> str:
@@ -31,6 +32,18 @@ def set_active_llm_key(api_key: SecretStr | None):
 
 def reset_active_llm_key(token) -> None:
     _ACTIVE_LLM_KEY_VAR.reset(token)
+
+
+def get_active_db_url() -> SecretStr | None:
+    return _ACTIVE_DB_URL_VAR.get()
+
+
+def set_active_db_url(db_url: SecretStr | None):
+    return _ACTIVE_DB_URL_VAR.set(db_url)
+
+
+def reset_active_db_url(token) -> None:
+    _ACTIVE_DB_URL_VAR.reset(token)
 
 
 class Settings(BaseSettings):
@@ -82,12 +95,32 @@ class Settings(BaseSettings):
     provider_timeout_seconds: float = 30.0
     log_level: str = "INFO"
 
+    # Phase 2a: Neon Connection & Ingestion settings
+    environment: str = "development"
+    allowed_db_host_suffixes: list[str] = [".neon.tech"]
+    user_db_connect_timeout_seconds: float = 10.0
+    user_db_statement_timeout_ms: int = 15000
+    ingest_deadline_seconds: float = 60.0
+    connection_ttl_hours: int = 24
+    max_connections_per_user: int = 3
+    max_tables_per_connection: int = 200
+    connection_mutation_limit: int = 10
+    allow_private_db_hosts_for_tests: bool = False
+
+    # Phase 2b: User-DB Query Execution & Change-Script settings
+    allow_free_tier_on_user_db: bool = False
+    user_db_max_result_bytes: int = 1_048_576
+    user_db_max_cell_bytes: int = 65_536
+    max_concurrent_user_db_queries_per_user: int = 2
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
+    if settings.allow_private_db_hosts_for_tests and settings.environment.lower() == "production":
+        raise RuntimeError("ALLOW_PRIVATE_DB_HOSTS_FOR_TESTS cannot be enabled in production")
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

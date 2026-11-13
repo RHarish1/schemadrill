@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -18,16 +19,37 @@ from app.auth import current_user, current_user_id
 from app.config import (
     get_request_id,
     get_settings,
+    reset_active_db_url,
     reset_active_llm_key,
     reset_request_id,
+    set_active_db_url,
     set_active_llm_key,
     set_request_id,
+)
+from app.connections import (
+    ConnectionLimitError,
+    ConnectionMismatchError,
+    ConnectionNotFoundError,
+    CredentialsError,
+    DatabaseTimeoutError,
+    DatabaseUnreachableError,
+    TenantConnectionSummary,
+    create_and_ingest_connection,
+    delete_connection,
+    get_connection,
+    inspect_connection,
+    list_connections,
+    parse_and_validate_db_url,
+    reap_expired_and_stale_connections,
+    reingest_connection,
 )
 from app.db import close_pool
 from app.embedding import get_embedding_model
 from app.llm_client import ModelRoutingState, provider_metrics
 from app.models import (
     AuthenticatedUser,
+    ConnectionResponse,
+    CreateConnectionRequest,
     ExecutionTraceResponse,
     ModelInfoResponse,
     QueryRequest,
@@ -60,6 +82,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.query_slots = asyncio.Semaphore(settings.max_concurrent_queries)
+    app.state.user_db_semaphores = {}
     app.state.metrics = ReliabilityMetrics()
     app.state.rate_limiter = InMemoryRateLimiter()
     app.state.model_cache = ModelListCache()
@@ -72,13 +95,14 @@ async def lifespan(app: FastAPI):
         logger.info("embedding_model_preload_started model=%s", settings.embedding_model)
         await asyncio.to_thread(get_embedding_model)
         logger.info("embedding_model_preload_completed model=%s", settings.embedding_model)
+    reap_expired_and_stale_connections(settings)
     yield
     if app.state.redis is not None:
         await app.state.redis.aclose()
     close_pool()
 
 
-app = FastAPI(title="SchemaDrill", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="SchemaDrill", version="0.6.0", lifespan=lifespan)
 
 
 def _derive_request_id(request: Request) -> str:
@@ -171,6 +195,15 @@ def _extract_llm_credentials(request: Request) -> tuple[str, SecretStr | None, b
     raw_key = (request.headers.get("X-LLM-Api-Key") or "").strip()
     api_key = SecretStr(raw_key) if raw_key else None
     return provider_name, api_key, provider_specified
+
+
+def _extract_db_url(request: Request) -> SecretStr | None:
+    raw_db_url = request.headers.get("X-DB-Url", "").strip()
+    if not raw_db_url:
+        return None
+    # unquote percent-encoded postgres URI
+    decoded = unquote(raw_db_url)
+    return SecretStr(decoded)
 
 
 async def _check_rate_limit(limiter, key: str, limit: int, window_seconds: int):
@@ -466,11 +499,70 @@ async def query(
         email=user.email,
         display_name=user.display_name,
     )
-    if not user_has_dataset(user_id, payload.db, settings):
-        raise HTTPException(status_code=404, detail="Dataset not found")
 
     provider_name, api_key, provider_specified = _extract_llm_credentials(request)
     tier: Literal["free", "byok"] = "byok" if api_key is not None else "free"
+
+    conn_summary: TenantConnectionSummary | None = None
+    raw_db_url: SecretStr | None = None
+    if payload.connection_id is not None:
+        if tier == "free" and not settings.allow_free_tier_on_user_db:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "code": "byok_required",
+                    "detail": (
+                        "Bring your own API key (BYOK) in Settings to query your own "
+                        "Neon database."
+                    ),
+                },
+            )
+        raw_db_header = (request.headers.get("X-DB-Url") or "").strip()
+        if not raw_db_header:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "code": "db_credentials_required",
+                    "detail": "Missing X-DB-Url header",
+                },
+            )
+        raw_db_url = SecretStr(raw_db_header)
+        try:
+            conn_summary = await asyncio.to_thread(
+                get_connection, payload.connection_id, user_id, settings
+            )
+        except ConnectionNotFoundError:
+            return JSONResponse(
+                status_code=404,
+                content={"code": "not_found", "detail": "Connection not found"},
+            )
+        if conn_summary.ingest_status != "ready":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": "connection_not_ready",
+                    "detail": (
+                        f"Connection status is '{conn_summary.ingest_status}', expected 'ready'."
+                    ),
+                },
+            )
+        if conn_summary.is_expired:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": "schema_stale",
+                    "detail": "Connection schema has expired. Please re-ingest this connection.",
+                },
+            )
+        if payload.db not in conn_summary.schemas:
+            return JSONResponse(
+                status_code=404,
+                content={"code": "not_found", "detail": "Schema not found in this connection"},
+            )
+    else:
+        if not user_has_dataset(user_id, payload.db, settings):
+            raise HTTPException(status_code=404, detail="Dataset not found")
+
     key_token = set_active_llm_key(api_key)
     try:
         provider = None
@@ -605,12 +697,39 @@ async def query(
                 else None
             )
 
+        user_db_sem: asyncio.Semaphore | None = None
+        user_db_slot_held = False
+        if conn_summary is not None:
+            sem_map = getattr(application.state, "user_db_semaphores", None)
+            if sem_map is None:
+                sem_map = {}
+                application.state.user_db_semaphores = sem_map
+            user_db_sem = sem_map.get(user_id)
+            if user_db_sem is None:
+                user_db_sem = asyncio.Semaphore(settings.max_concurrent_user_db_queries_per_user)
+                sem_map[user_id] = user_db_sem
+            try:
+                await asyncio.wait_for(
+                    user_db_sem.acquire(),
+                    timeout=settings.concurrency_wait_seconds,
+                )
+            except TimeoutError as error:
+                application.state.metrics.increment("concurrency_rejections")
+                logger.info("user_db_concurrency_rejected request_id=%s", request_id)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Too many concurrent queries for your database",
+                ) from error
+            user_db_slot_held = True
+
         try:
             await asyncio.wait_for(
                 application.state.query_slots.acquire(),
                 timeout=settings.concurrency_wait_seconds,
             )
         except TimeoutError as error:
+            if user_db_slot_held and user_db_sem is not None:
+                user_db_sem.release()
             application.state.metrics.increment("concurrency_rejections")
             logger.info("query_concurrency_rejected request_id=%s", request_id)
             raise HTTPException(status_code=503, detail="Query capacity is busy") from error
@@ -647,7 +766,13 @@ async def query(
             payload.fk_expansion,
             effective_max_retries,
         )
-        internal_trace = InternalTrace(request_id=request_id, db=payload.db, tier=tier)
+        internal_trace = InternalTrace(
+            request_id=request_id,
+            db=payload.db,
+            tier=tier,
+            dataset_kind="user_db" if conn_summary is not None else "demo",
+            connection_id=conn_summary.id if conn_summary is not None else None,
+        )
         pipeline_params = inspect.signature(run_pipeline).parameters
         pipeline_kwargs: dict[str, object] = {"settings": effective_settings}
         if "trace" in pipeline_params:
@@ -658,6 +783,15 @@ async def query(
             pipeline_kwargs["routing"] = routing
         if "tier" in pipeline_params:
             pipeline_kwargs["tier"] = tier
+        if conn_summary is not None:
+            if "user_id" in pipeline_params:
+                pipeline_kwargs["user_id"] = user_id
+            if "connection_summary" in pipeline_params:
+                pipeline_kwargs["connection_summary"] = conn_summary
+            if "raw_db_url" in pipeline_params:
+                pipeline_kwargs["raw_db_url"] = raw_db_url
+            if "metrics" in pipeline_params:
+                pipeline_kwargs["metrics"] = application.state.metrics
 
         task = asyncio.create_task(
             asyncio.to_thread(run_pipeline, payload.question, payload.db, **pipeline_kwargs)
@@ -671,6 +805,8 @@ async def query(
             elapsed_ms = (time.perf_counter() - started) * 1000
             if isinstance(error, TimeoutError) and not task.done():
                 application.state.metrics.increment("query_timeouts")
+                if conn_summary is not None:
+                    application.state.metrics.increment("user_db_timeouts")
                 logger.warning(
                     "query_timeout request_id=%s db=%s duration_ms=%.0f",
                     request_id,
@@ -679,6 +815,9 @@ async def query(
                 )
                 task.add_done_callback(lambda _: application.state.query_slots.release())
                 slot_held = False
+                if user_db_slot_held and user_db_sem is not None:
+                    task.add_done_callback(lambda _, s=user_db_sem: s.release())
+                    user_db_slot_held = False
                 timeout_trace = (
                     build_public_execution_trace(internal_trace)
                     if internal_trace.has_stages()
@@ -698,6 +837,26 @@ async def query(
                     headers={"X-RateLimit-Remaining": str(remaining_quota)},
                 ) from error
 
+            if isinstance(
+                error,
+                (
+                    CredentialsError,
+                    ConnectionMismatchError,
+                    DatabaseUnreachableError,
+                    DatabaseTimeoutError,
+                ),
+            ):
+                if isinstance(error, DatabaseTimeoutError):
+                    application.state.metrics.increment("user_db_timeouts")
+                conn_resp = _handle_connection_exception(
+                    error,
+                    user_id=user_id,
+                    request_id=request_id,
+                    metrics=application.state.metrics,
+                )
+                conn_resp.headers["X-RateLimit-Remaining"] = str(remaining_quota)
+                return conn_resp
+
             execution_trace = getattr(error, "_execution_trace", None)
             if execution_trace is None and internal_trace.has_stages():
                 execution_trace = build_public_execution_trace(internal_trace, finalize=True)
@@ -714,6 +873,8 @@ async def query(
         finally:
             if slot_held:
                 application.state.query_slots.release()
+            if user_db_slot_held and user_db_sem is not None:
+                user_db_sem.release()
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         logger.info(
@@ -730,6 +891,287 @@ async def query(
         return result
     finally:
         reset_active_llm_key(key_token)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2a: Neon Connection & Ingestion Endpoints
+# ---------------------------------------------------------------------------
+
+
+def _handle_connection_exception(
+    error: Exception, user_id: str, request_id: str, metrics: ReliabilityMetrics
+) -> JSONResponse:
+    if isinstance(error, CredentialsError):
+        metrics.increment("db_credentials_rejected")
+        logger.warning(
+            "connection_credentials_rejected request_id=%s user_id=%s code=%s detail=%s",
+            request_id,
+            user_id,
+            error.code,
+            error.message[:120],
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"code": error.code, "detail": error.message},
+        )
+    if isinstance(error, ConnectionMismatchError):
+        metrics.increment("db_credentials_rejected")
+        logger.warning(
+            "connection_mismatch request_id=%s user_id=%s detail=%s",
+            request_id,
+            user_id,
+            error.message,
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"code": error.code, "detail": error.message},
+        )
+    if isinstance(error, DatabaseUnreachableError):
+        metrics.increment("user_db_unreachable")
+        logger.warning(
+            "connection_db_unreachable request_id=%s user_id=%s detail=%s",
+            request_id,
+            user_id,
+            error.message[:120],
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"code": error.code, "detail": error.message},
+        )
+    if isinstance(error, DatabaseTimeoutError):
+        metrics.increment("ingest_failures")
+        logger.warning(
+            "connection_db_timeout request_id=%s user_id=%s detail=%s",
+            request_id,
+            user_id,
+            error.message,
+        )
+        return JSONResponse(
+            status_code=504,
+            content={"code": error.code, "detail": error.message},
+        )
+    if isinstance(error, ConnectionLimitError):
+        logger.warning(
+            "connection_limit_reached request_id=%s user_id=%s detail=%s",
+            request_id,
+            user_id,
+            error.message,
+        )
+        return JSONResponse(
+            status_code=409,
+            content={"code": error.code, "detail": error.message},
+        )
+    if isinstance(error, ConnectionNotFoundError):
+        return JSONResponse(
+            status_code=404,
+            content={"code": error.code, "detail": error.message},
+        )
+    metrics.increment("ingest_failures")
+    logger.exception(
+        "connection_operation_failed request_id=%s user_id=%s error_type=%s",
+        request_id,
+        user_id,
+        type(error).__name__,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Connection operation failed"},
+    )
+
+
+async def _rate_limit_connection_mutation(request: Request, user_id: str) -> None:
+    settings = get_settings()
+    request_id = get_request_id()
+    try:
+        rate_result = await _check_rate_limit(
+            request.app.state.rate_limiter,
+            f"conn_mutation:{user_id}",
+            settings.connection_mutation_limit,
+            60,
+        )
+    except Exception as error:
+        logger.warning(
+            "rate_limiter_unavailable request_id=%s error_type=%s", request_id, type(error).__name__
+        )
+        if not settings.redis_fail_open:
+            raise HTTPException(status_code=503, detail="Rate limiter unavailable") from error
+        rate_result = None
+
+    if rate_result is not None and not rate_result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many connection mutation requests. Please wait a minute and try again.",
+            headers={"Retry-After": str(rate_result.retry_after)},
+        )
+
+
+@app.post("/api/connections/inspect")
+async def inspect_db_connection(request: Request) -> Response:
+    settings = get_settings()
+    request_id = get_request_id()
+    user = current_user(request)
+    user_id = user.user_id
+    provision_user(user_id, settings, email=user.email, display_name=user.display_name)
+
+    db_url_secret = _extract_db_url(request)
+    if db_url_secret is None:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "db_credentials_required", "detail": "Missing X-DB-Url header"},
+        )
+
+    db_token = set_active_db_url(db_url_secret)
+    try:
+        parsed_info = parse_and_validate_db_url(db_url_secret, settings=settings)
+        summaries = await asyncio.to_thread(inspect_connection, parsed_info, settings)
+        return JSONResponse(
+            content={
+                "schemas": [
+                    {"schema_name": s.schema_name, "table_count": s.table_count} for s in summaries
+                ]
+            }
+        )
+    except Exception as e:
+        return _handle_connection_exception(
+            e, user_id=user_id, request_id=request_id, metrics=request.app.state.metrics
+        )
+    finally:
+        reset_active_db_url(db_token)
+
+
+@app.post("/api/connections")
+async def create_connection(
+    request: Request,
+    payload: CreateConnectionRequest,
+) -> Response:
+    settings = get_settings()
+    request_id = get_request_id()
+    user = current_user(request)
+    user_id = user.user_id
+    provision_user(user_id, settings, email=user.email, display_name=user.display_name)
+
+    await _rate_limit_connection_mutation(request, user_id)
+
+    db_url_secret = _extract_db_url(request)
+    if db_url_secret is None:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "db_credentials_required", "detail": "Missing X-DB-Url header"},
+        )
+
+    db_token = set_active_db_url(db_url_secret)
+    try:
+        parsed_info = parse_and_validate_db_url(db_url_secret, settings=settings)
+        summary = await asyncio.to_thread(
+            create_and_ingest_connection,
+            user_id,
+            payload.label,
+            payload.schemas,
+            parsed_info,
+            settings,
+        )
+        request.app.state.metrics.increment("connections_created")
+        logger.info(
+            "connection_created request_id=%s user_id=%s connection_id=%s host=%s tables=%d",
+            request_id,
+            user_id,
+            summary.id,
+            summary.host,
+            summary.table_count,
+        )
+        return JSONResponse(content=ConnectionResponse(**summary.__dict__).model_dump(mode="json"))
+    except Exception as e:
+        return _handle_connection_exception(
+            e, user_id=user_id, request_id=request_id, metrics=request.app.state.metrics
+        )
+    finally:
+        reset_active_db_url(db_token)
+
+
+@app.get("/api/connections")
+async def list_user_connections(request: Request) -> Response:
+    settings = get_settings()
+    user = current_user(request)
+    user_id = user.user_id
+    provision_user(user_id, settings, email=user.email, display_name=user.display_name)
+
+    summaries = await asyncio.to_thread(list_connections, user_id, settings)
+    data = [ConnectionResponse(**s.__dict__).model_dump(mode="json") for s in summaries]
+    return JSONResponse(content=data)
+
+
+@app.post("/api/connections/{connection_id}/reingest")
+async def reingest_user_connection(
+    connection_id: str,
+    request: Request,
+) -> Response:
+    settings = get_settings()
+    request_id = get_request_id()
+    user = current_user(request)
+    user_id = user.user_id
+    provision_user(user_id, settings, email=user.email, display_name=user.display_name)
+
+    await _rate_limit_connection_mutation(request, user_id)
+
+    db_url_secret = _extract_db_url(request)
+    if db_url_secret is None:
+        return JSONResponse(
+            status_code=403,
+            content={"code": "db_credentials_required", "detail": "Missing X-DB-Url header"},
+        )
+
+    db_token = set_active_db_url(db_url_secret)
+    try:
+        parsed_info = parse_and_validate_db_url(db_url_secret, settings=settings)
+        summary = await asyncio.to_thread(
+            reingest_connection,
+            connection_id,
+            user_id,
+            parsed_info,
+            settings,
+        )
+        logger.info(
+            "connection_reingested request_id=%s user_id=%s connection_id=%s tables=%d",
+            request_id,
+            user_id,
+            summary.id,
+            summary.table_count,
+        )
+        return JSONResponse(content=ConnectionResponse(**summary.__dict__).model_dump(mode="json"))
+    except Exception as e:
+        return _handle_connection_exception(
+            e, user_id=user_id, request_id=request_id, metrics=request.app.state.metrics
+        )
+    finally:
+        reset_active_db_url(db_token)
+
+
+@app.delete("/api/connections/{connection_id}")
+async def delete_user_connection(
+    connection_id: str,
+    request: Request,
+) -> Response:
+    settings = get_settings()
+    request_id = get_request_id()
+    user = current_user(request)
+    user_id = user.user_id
+    provision_user(user_id, settings, email=user.email, display_name=user.display_name)
+
+    await _rate_limit_connection_mutation(request, user_id)
+
+    try:
+        await asyncio.to_thread(delete_connection, connection_id, user_id, settings)
+        logger.info(
+            "connection_deleted request_id=%s user_id=%s connection_id=%s",
+            request_id,
+            user_id,
+            connection_id,
+        )
+        return JSONResponse(content={"ok": True})
+    except Exception as e:
+        return _handle_connection_exception(
+            e, user_id=user_id, request_id=request_id, metrics=request.app.state.metrics
+        )
 
 
 frontend_directory = Path(__file__).resolve().parent.parent / "frontend" / "dist"

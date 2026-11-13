@@ -4,21 +4,36 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Literal, Protocol
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
+import psycopg
 from psycopg import Error as PsycopgError
 from pydantic import SecretStr
 
-from app.config import Settings, get_request_id, get_settings
+from app.config import (
+    Settings,
+    get_request_id,
+    get_settings,
+    reset_active_db_url,
+    set_active_db_url,
+)
+from app.connections import (
+    ConnectionMismatchError,
+    DatabaseTimeoutError,
+    ParsedConnectionInfo,
+    TenantConnectionSummary,
+    connect_user_db,
+    parse_and_validate_db_url,
+)
 from app.db import readonly_connection
 from app.executor import dry_run, execute
 from app.instrumentation import PipelineTelemetry
 from app.llm_client import ModelRoutingState, generate
 from app.models import QueryResult, RetrievalResult, RetryState, RowCapExceeded, SqlResponse
 from app.prompting import estimate_prompt_tokens, feedback, messages_for_retry
-from app.reliability import classify_provider_error, sanitize_log_detail
-from app.retrieval import get_retrieval_provider
-from app.sql_guard import default_guard_config, guard_sql
+from app.reliability import ReliabilityMetrics, classify_provider_error, sanitize_log_detail
+from app.retrieval import TenantPgVectorRetrievalProvider, get_retrieval_provider
+from app.sql_guard import DEMO_CHANGE_REJECTED_MESSAGE, default_guard_config, guard_sql
 from app.trace import (
     InternalTrace,
     build_public_execution_trace,
@@ -67,8 +82,22 @@ def build_pipeline_stages(
     trace: InternalTrace | None = None,
     api_key: SecretStr | None = None,
     routing: ModelRoutingState | None = None,
+    user_id: str | None = None,
+    connection_summary: TenantConnectionSummary | None = None,
+    parsed_connection_info: ParsedConnectionInfo | None = None,
 ) -> list[PipelineStage]:
-    retrieve_fn = retrieve or get_retrieval_provider(settings).retrieve
+    if retrieve is not None:
+        retrieve_fn = retrieve
+    elif connection_summary is not None and user_id is not None:
+        retrieve_fn = TenantPgVectorRetrievalProvider(
+            settings,
+            connection_id=connection_summary.id,
+            user_id=user_id,
+        ).retrieve
+    else:
+        retrieve_fn = get_retrieval_provider(settings).retrieve
+
+    is_user_db = connection_summary is not None
     retrieval_complete = False
     authorized_tables = (
         {table.lower() for table in allowed_tables} if allowed_tables is not None else None
@@ -144,7 +173,7 @@ def build_pipeline_stages(
 
     def generation_stage(state: RetryState) -> RetryState:
         prompt_started = time.perf_counter()
-        messages = messages_for_retry(state)
+        messages = messages_for_retry(state, allow_change_scripts=is_user_db)
         prompt_ms = (time.perf_counter() - prompt_started) * 1000
         request_chars = sum(len(item["content"]) for item in messages)
         if trace is not None:
@@ -219,17 +248,59 @@ def build_pipeline_stages(
         state.last_sql = response.sql
         return state
 
+    @contextmanager
+    def _execution_connection() -> Iterator[psycopg.Connection]:
+        if is_user_db:
+            assert parsed_connection_info is not None
+            conn_started = time.perf_counter()
+            with connect_user_db(parsed_connection_info, settings=settings) as conn:
+                conn_ms = (time.perf_counter() - conn_started) * 1000
+                if trace is not None:
+                    trace.user_db_connect_ms = (trace.user_db_connect_ms or 0.0) + conn_ms
+                yield conn
+        else:
+            with readonly_connection() as conn:
+                yield conn
+
     def gate_stage(state: RetryState) -> RetryState:
         started = time.perf_counter()
+        guard_cfg = default_guard_config(
+            settings.max_result_rows,
+            mode="user_db" if is_user_db else "demo",
+            allow_change_scripts=is_user_db,
+        )
         with telemetry.span("sql_validation", attempt=state.attempt) if telemetry else _null_span():
             guard_result = guard_sql(
                 state.last_sql or "",
                 authorized_tables or set(),
-                default_guard_config(settings.max_result_rows),
+                guard_cfg,
             )
         if not guard_result.allowed:
             validation_ms = (time.perf_counter() - started) * 1000
             kind = "parse_error" if guard_result.statement_type == "UNKNOWN" else "sql_guard"
+            if not is_user_db and guard_result.intent == "change":
+                if trace is not None:
+                    trace.record_validation(
+                        attempt=state.attempt,
+                        duration_ms=validation_ms,
+                        allowed=False,
+                        statement_type=guard_result.statement_type,
+                        limit_injected=False,
+                        dry_run_passed=False,
+                        rejection_reason=guard_result.rejection_reason,
+                    )
+                    trace.record_stage(
+                        "SQL validation",
+                        status="failed",
+                        duration_ms=validation_ms,
+                        details={
+                            "summary": DEMO_CHANGE_REJECTED_MESSAGE,
+                            "sql_syntax": "passed",
+                            "read_only_policy": "failed",
+                            "dry_run": "skipped",
+                        },
+                    )
+                raise _TerminalStage(DEMO_CHANGE_REJECTED_MESSAGE)
             summary = (
                 "Generated SQL could not be parsed as valid PostgreSQL."
                 if kind == "parse_error"
@@ -270,16 +341,57 @@ def build_pipeline_stages(
                     details=validation_checks,
                 )
             raise _RetryStage(kind, guard_result.user_facing_message or "Security policy rejection")
+
         state.last_sql = guard_result.sql
+        result["intent"] = guard_result.intent
+        result["warnings"] = guard_result.warnings
+        if trace is not None:
+            trace.intent = guard_result.intent
+
+        # Change-script mode: AST-validated only; NEVER run EXPLAIN or execute.
+        if guard_result.intent == "change":
+            validation_ms = (time.perf_counter() - started) * 1000
+            if trace is not None:
+                trace.record_validation(
+                    attempt=state.attempt,
+                    duration_ms=validation_ms,
+                    allowed=True,
+                    statement_type=guard_result.statement_type,
+                    limit_injected=False,
+                    dry_run_passed=True,
+                )
+                trace.record_stage(
+                    "SQL validation",
+                    status="passed",
+                    duration_ms=validation_ms,
+                    details={
+                        "summary": "Change script validated (not executed).",
+                        "sql_syntax": "passed",
+                        "read_only_policy": "passed",
+                        "dry_run": "skipped",
+                    },
+                )
+            return state
 
         try:
             with (
                 telemetry.span("sql_dry_run", attempt=state.attempt) if telemetry else _null_span()
             ):
-                with readonly_connection() as connection:
+                with _execution_connection() as connection:
                     dry_run(connection, state.last_sql or "")
         except PsycopgError as error:
             validation_ms = (time.perf_counter() - started) * 1000
+            sqlstate = getattr(error, "sqlstate", None)
+            if is_user_db and sqlstate in ("42P01", "42703"):
+                result["stale_schema_error"] = True
+            if is_user_db and (
+                isinstance(error, psycopg.errors.QueryCanceled)
+                or "statement timeout" in str(error).lower()
+            ):
+                raise DatabaseTimeoutError(
+                    "Database dry-run timed out.", code="user_db_timeout"
+                ) from error
+            safe_reason = type(error).__name__ if is_user_db else str(error).splitlines()[0]
             if trace is not None:
                 trace.record_validation(
                     attempt=state.attempt,
@@ -288,7 +400,7 @@ def build_pipeline_stages(
                     statement_type=guard_result.statement_type,
                     limit_injected=guard_result.limit_injected,
                     dry_run_passed=False,
-                    rejection_reason=str(error).splitlines()[0],
+                    rejection_reason=safe_reason,
                 )
                 trace.record_stage(
                     "SQL validation",
@@ -332,6 +444,8 @@ def build_pipeline_stages(
         return state
 
     def execute_stage(state: RetryState) -> RetryState:
+        if result.get("intent") == "change":
+            return state
         started = time.perf_counter()
         try:
             with (
@@ -339,39 +453,73 @@ def build_pipeline_stages(
                 if telemetry
                 else _null_span()
             ):
-                with readonly_connection() as connection:
+                with _execution_connection() as connection:
                     if pre_execute_check:
                         pre_execute_check(state.last_sql or "")
-                    result["dataframe"] = execute(
-                        connection, state.last_sql or "", settings.max_result_rows
-                    )
+                    if is_user_db:
+                        result["dataframe"] = execute(
+                            connection,
+                            state.last_sql or "",
+                            settings.max_result_rows,
+                            max_result_bytes=settings.user_db_max_result_bytes,
+                            max_cell_bytes=settings.user_db_max_cell_bytes,
+                        )
+                    else:
+                        result["dataframe"] = execute(
+                            connection,
+                            state.last_sql or "",
+                            settings.max_result_rows,
+                        )
         except RowCapExceeded as error:
             exec_ms = (time.perf_counter() - started) * 1000
             if trace is not None:
-                trace.record_execution(duration_ms=exec_ms, error_type="RowCapExceeded")
+                trace.record_execution(duration_ms=exec_ms, error_type=type(error).__name__)
                 trace.record_stage(
                     "Query execution",
                     status="failed",
                     duration_ms=exec_ms,
-                    details={"summary": "The query exceeded the maximum allowed result rows."},
+                    details={"summary": "The query exceeded the maximum allowed result size."},
                 )
             raise _RetryStage("row_cap", str(error)) from error
         except PsycopgError as error:
             exec_ms = (time.perf_counter() - started) * 1000
-            detail = sanitize_log_detail(str(error)) or type(error).__name__
-            logger.warning(
-                "pipeline_execution_failed request_id=%s db=%s attempt=%d error_type=%s detail=%r",
-                get_request_id(),
-                db,
-                state.attempt,
-                type(error).__name__,
-                detail,
-            )
-            user_message = (
-                "The database query took too long to execute."
-                if "statement timeout" in detail.lower()
-                else "Query execution failed."
-            )
+            sqlstate = getattr(error, "sqlstate", None)
+            if is_user_db and sqlstate in ("42P01", "42703"):
+                result["stale_schema_error"] = True
+            if is_user_db and (
+                isinstance(error, psycopg.errors.QueryCanceled)
+                or "statement timeout" in str(error).lower()
+            ):
+                raise DatabaseTimeoutError(
+                    "The database query took too long to execute.", code="user_db_timeout"
+                ) from error
+            if is_user_db:
+                logger.warning(
+                    "pipeline_execution_failed request_id=%s db=%s attempt=%d "
+                    "error_type=%s sqlstate=%s",
+                    get_request_id(),
+                    db,
+                    state.attempt,
+                    type(error).__name__,
+                    sqlstate,
+                )
+                user_message = "Query execution failed."
+            else:
+                detail = sanitize_log_detail(str(error)) or type(error).__name__
+                logger.warning(
+                    "pipeline_execution_failed request_id=%s db=%s attempt=%d "
+                    "error_type=%s detail=%r",
+                    get_request_id(),
+                    db,
+                    state.attempt,
+                    type(error).__name__,
+                    detail,
+                )
+                user_message = (
+                    "The database query took too long to execute."
+                    if "statement timeout" in detail.lower()
+                    else "Query execution failed."
+                )
             if trace is not None:
                 trace.record_execution(duration_ms=exec_ms, error_type=type(error).__name__)
                 trace.record_stage(
@@ -395,6 +543,12 @@ def build_pipeline_stages(
     return [retrieval_stage, generation_stage, gate_stage, execute_stage]
 
 
+_CHANGE_SCRIPT_BANNER = "-- AI-generated, review before running.\n"
+_CHANGE_SCRIPT_MESSAGE = (
+    "SchemaDrill doesn't run changes yet. Review this and run it in the Neon SQL Editor."
+)
+
+
 def run_pipeline(
     question: str,
     db: str,
@@ -409,6 +563,10 @@ def run_pipeline(
     api_key: SecretStr | None = None,
     routing: ModelRoutingState | None = None,
     tier: Literal["free", "byok"] | None = None,
+    user_id: str | None = None,
+    connection_summary: TenantConnectionSummary | None = None,
+    raw_db_url: SecretStr | None = None,
+    metrics: ReliabilityMetrics | None = None,
 ) -> QueryResult:
     settings = settings or get_settings()
     internal_trace = trace or InternalTrace(request_id=get_request_id(), db=db)
@@ -421,11 +579,41 @@ def run_pipeline(
         internal_trace.fallback_used = routing.fallback_used
     internal_trace.top_k = None if settings.full_schema_retrieval else settings.top_k
     internal_trace.fk_expansion = settings.enable_fk_expansion
-    internal_trace.execution_mode = (
-        "read_only_role_and_transaction"
-        if urlparse(settings.database_url).username == "schemadrill_readonly"
-        else "read_only_transaction"
-    )
+
+    is_user_db = connection_summary is not None
+    internal_trace.dataset_kind = "user_db" if is_user_db else "demo"
+    if is_user_db:
+        internal_trace.connection_id = connection_summary.id
+        internal_trace.execution_mode = "user_db_read_only_transaction"
+    else:
+        internal_trace.execution_mode = (
+            "read_only_role_and_transaction"
+            if urlparse(settings.database_url).username == "schemadrill_readonly"
+            else "read_only_transaction"
+        )
+
+    db_token = None
+    parsed_connection_info: ParsedConnectionInfo | None = None
+    if is_user_db:
+        assert connection_summary is not None
+        if raw_db_url is None:
+            from app.connections import CredentialsError
+
+            raise CredentialsError("Missing X-DB-Url header", code="db_credentials_required")
+        # Decode credential once per request in the worker thread only.
+        decoded_secret = SecretStr(unquote(raw_db_url.get_secret_value()))
+        db_token = set_active_db_url(decoded_secret)
+        parsed_connection_info = parse_and_validate_db_url(decoded_secret, settings=settings)
+        if (
+            parsed_connection_info.host.lower() != connection_summary.host.lower()
+            or parsed_connection_info.database != connection_summary.database
+            or parsed_connection_info.user != connection_summary.role_name
+        ):
+            reset_active_db_url(db_token)
+            raise ConnectionMismatchError(
+                "Provided credentials do not match stored connection host, database, or role."
+            )
+
     trace_token = set_current_trace(internal_trace)
 
     state = RetryState(question=question, attempt=1)
@@ -443,6 +631,9 @@ def run_pipeline(
         internal_trace,
         api_key=api_key,
         routing=routing,
+        user_id=user_id,
+        connection_summary=connection_summary,
+        parsed_connection_info=parsed_connection_info,
     )
     effective_attempt_budget = 1 if settings.disable_self_correction else settings.max_retries
 
@@ -475,7 +666,7 @@ def run_pipeline(
                         db,
                         attempt,
                         error.kind,
-                        sanitize_log_detail(error.detail),
+                        "[redacted_user_db]" if is_user_db else sanitize_log_detail(error.detail),
                     )
                     if telemetry:
                         telemetry.spans.append(
@@ -494,16 +685,41 @@ def run_pipeline(
                 except _TerminalStage as error:
                     internal_trace.log_internal_telemetry(status="failed")
                     public_trace = build_public_execution_trace(internal_trace, finalize=True)
+                    stale = bool(result.get("stale_schema_error"))
                     return QueryResult(
                         status="failed",
                         sql=state.last_sql,
                         reason=str(error),
                         attempts=attempt,
+                        hint_code="schema_maybe_stale" if stale else None,
+                        hint_message=(
+                            "Schema may have changed since ingestion. Re-ingest this connection."
+                            if stale
+                            else None
+                        ),
                         execution_trace=public_trace,
                     )
                 finally:
                     if telemetry:
                         telemetry.default_parent_span_id = None
+
+                if result.get("intent") == "change":
+                    if metrics is not None:
+                        metrics.increment("change_scripts_generated")
+                    banner_sql = f"{_CHANGE_SCRIPT_BANNER}{state.last_sql or ''}"
+                    warnings = list(result.get("warnings") or [])  # type: ignore[arg-type]
+                    internal_trace.log_internal_telemetry(status="success")
+                    public_trace = build_public_execution_trace(internal_trace, finalize=True)
+                    return QueryResult(
+                        status="success",
+                        kind="change_script",
+                        executed=False,
+                        sql=banner_sql,
+                        warnings=warnings,
+                        message=_CHANGE_SCRIPT_MESSAGE,
+                        attempts=attempt,
+                        execution_trace=public_trace,
+                    )
 
                 dataframe = result["dataframe"]
                 columns = list(getattr(dataframe, "columns", []))
@@ -546,15 +762,22 @@ def run_pipeline(
             get_request_id(),
             db,
             effective_attempt_budget,
-            sanitize_log_detail(state.last_error),
+            "[redacted_user_db]" if is_user_db else sanitize_log_detail(state.last_error),
         )
         internal_trace.log_internal_telemetry(status="failed")
         public_trace = build_public_execution_trace(internal_trace, finalize=True)
+        stale = bool(result.get("stale_schema_error"))
         return QueryResult(
             status="failed",
             sql=state.last_sql,
             reason=state.last_error or "unknown pipeline failure",
             attempts=effective_attempt_budget,
+            hint_code="schema_maybe_stale" if stale else None,
+            hint_message=(
+                "Schema may have changed since ingestion. Re-ingest this connection."
+                if stale
+                else None
+            ),
             execution_trace=public_trace,
         )
     except Exception as error:
@@ -567,6 +790,8 @@ def run_pipeline(
         raise
     finally:
         reset_current_trace(trace_token)
+        if db_token is not None:
+            reset_active_db_url(db_token)
 
 
 @contextmanager

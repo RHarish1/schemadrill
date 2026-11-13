@@ -1,10 +1,10 @@
 # Solution Design: How We Solve the Planned Problems
 
-Initial technical approach for each hard problem in the [roadmap](roadmap.md). These are
-proposals to review before building, not implemented code. Library and API names should be
-checked against current docs when implementing.
+Initial technical approach for each hard problem in the [roadmap](roadmap.md).
 
-## 1. Encrypting stored secrets (connection strings and LLM keys)
+> **Architectural Decision (Phase 1 & Phase 2a):** SchemaDrill holds zero server-side secret storage (no KMS, no database secret columns). LLM API keys and Neon Postgres credentials are session-held in the client browser (`sessionStorage`) and transported per request over encrypted HTTPS headers (`X-LLM-Api-Key` and `X-DB-Url`). Credentials live only in the worker thread locals for the duration of the request and are rigorously sanitized from logs, traces, exception representations, and responses.
+
+## 1. Zero-Storage Credential Transport (Phase 1 BYOK & Phase 2a Connections)
 
 **Problem:** we must store user secrets and be able to decrypt them later, but a database leak
 must not expose them.

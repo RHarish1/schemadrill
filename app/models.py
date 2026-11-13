@@ -1,10 +1,12 @@
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
 class SqlResponse(BaseModel):
     sql: str = Field(min_length=1)
+    intent: Literal["read", "change"] = "read"
 
 
 class AuthenticatedUser(BaseModel):
@@ -55,6 +57,11 @@ class QueryRequest(BaseModel):
         min_length=1,
         description="Optional fallback model ID when using your own API key (BYOK).",
     )
+    connection_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional UUID of a connected Neon database.",
+    )
 
 
 class ModelInfoResponse(BaseModel):
@@ -80,6 +87,8 @@ class ExecutionTraceResponse(BaseModel):
     top_k: int | None = None
     fk_expansion: bool | None = None
     execution_mode: str = "read_only"
+    dataset_kind: Literal["demo", "user_db"] = "demo"
+    intent: Literal["read", "change"] = "read"
     tier: Literal["free", "byok"] | None = None
     model: str | None = None
     fallback_used: bool = False
@@ -90,26 +99,37 @@ class ExecutionTraceResponse(BaseModel):
 
 class QueryResult(BaseModel):
     status: Literal["success", "failed"]
+    kind: Literal["read", "change_script"] = "read"
+    executed: bool = True
     sql: str | None = None
     table_markdown: str | None = None
     columns: list[str] = Field(default_factory=list)
     rows: list[dict[str, object]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    message: str | None = None
     attempts: int
     reason: str | None = None
+    hint_code: str | None = None
+    hint_message: str | None = None
     execution_trace: ExecutionTraceResponse | None = None
 
 
 class SQLGuardConfig(BaseModel):
     max_limit: int = Field(default=1000, gt=0)
     blocked_functions: set[str] = Field(default_factory=set)
+    mode: Literal["demo", "user_db"] = "demo"
+    allow_change_scripts: bool = False
+    max_change_statements: int = Field(default=10, gt=0)
 
 
 class SQLGuardResult(BaseModel):
     allowed: bool
     sql: str | None = None
     statement_type: str
+    intent: Literal["read", "change"] = "read"
     referenced_tables: list[str] = Field(default_factory=list)
     blocked_functions: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     rejection_reason: str | None = None
     user_facing_message: str | None = None
     limit_injected: bool = False
@@ -145,4 +165,35 @@ class RowCapExceeded(Exception):
     pass
 
 
+class ByteCapExceeded(RowCapExceeded):
+    pass
+
+
 FeedbackKind = Literal["parse_error", "dry_run_error", "row_cap", "sql_guard"]
+
+
+class InspectConnectionResponse(BaseModel):
+    schemas: list[dict[str, Any]] = Field(
+        description="List of schemas and table counts: [{'schema_name': str, 'table_count': int}]"
+    )
+
+
+class CreateConnectionRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=100)
+    schemas: list[str] = Field(min_length=1)
+
+
+class ConnectionResponse(BaseModel):
+    id: str
+    label: str
+    host: str
+    database: str
+    role_name: str
+    schemas: list[str]
+    ingest_status: str
+    table_count: int
+    ingested_at: datetime | None = None
+    expires_at: datetime
+    created_at: datetime
+    is_expired: bool
+    needs_credentials: bool = True

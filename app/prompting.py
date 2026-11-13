@@ -12,6 +12,17 @@ user asks you to search "West", search "west" as well.
 Target dialect: PostgreSQL. Generate a read-only query.
 """
 
+USER_DB_SYSTEM_PROMPT = """You are an expert PostgreSQL SQL generator.
+Use only the tables and columns present in the supplied schema context.
+Target dialect: PostgreSQL.
+You may emit intent="change" ONLY when the user clearly asks to modify data or schema
+(INSERT, UPDATE, DELETE, MERGE, CREATE, ALTER, DROP, TRUNCATE). Otherwise emit intent="read"
+with a single read-only SELECT query.
+Never mix read (SELECT) and change statements in one response.
+For read queries, use leniency in matching case, names, regions, and "all" unless the user
+explicitly says otherwise.
+"""
+
 
 def build_messages(
     schema_blocks: list[DDLBlock],
@@ -19,6 +30,7 @@ def build_messages(
     *,
     last_sql: str | None = None,
     last_error: str | None = None,
+    allow_change_scripts: bool = False,
 ) -> list[dict[str, str]]:
     schema_context = "\n\n".join(block.ddl_text for block in schema_blocks)
     retry_context = ""
@@ -29,8 +41,9 @@ def build_messages(
             f"Failure reason: {last_error or '[none]'}\n"
             "Return a corrected SQL query only."
         )
+    system_prompt = USER_DB_SYSTEM_PROMPT if allow_change_scripts else SYSTEM_PROMPT
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {
             "role": "user",
             "content": f"Schema context:\n{schema_context}\n\nQuestion:\n{question}{retry_context}",
@@ -40,12 +53,17 @@ def build_messages(
     return messages
 
 
-def messages_for_retry(state: RetryState) -> list[dict[str, str]]:
+def messages_for_retry(
+    state: RetryState,
+    *,
+    allow_change_scripts: bool = False,
+) -> list[dict[str, str]]:
     return build_messages(
         state.retrieved_ddl,
         state.question,
         last_sql=state.last_sql,
         last_error=state.last_error,
+        allow_change_scripts=allow_change_scripts,
     )
 
 
