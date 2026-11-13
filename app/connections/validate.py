@@ -1,5 +1,7 @@
 import ipaddress
+import os
 import socket
+import ssl
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +11,7 @@ import psycopg
 from pydantic import SecretStr
 
 from app.config import Settings, get_settings
+from app.reliability import sanitize_log_detail
 
 
 class CredentialsError(Exception):
@@ -221,6 +224,25 @@ def parse_and_validate_db_url(
     )
 
 
+def _resolve_system_ca_bundle() -> str:
+    """Return the system CA bundle path for verify-full TLS verification.
+
+    psycopg-binary bundles OpenSSL with OPENSSLDIR=/usr/lib/psycopg-openssl, so
+    libpq's sslrootcert='system' does not locate Debian's /etc/ssl/certs/ca-certificates.crt
+    unless an existing CA bundle file path is passed explicitly.
+    """
+    candidates = [
+        ssl.get_default_verify_paths().cafile,
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/cert.pem",
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    return "system"
+
+
 def connect_user_db(
     info: ParsedConnectionInfo,
     settings: Settings | None = None,
@@ -259,7 +281,7 @@ def connect_user_db(
 
     if not allow_private:
         conn_params["sslmode"] = "verify-full"
-        conn_params["sslrootcert"] = "system"
+        conn_params["sslrootcert"] = _resolve_system_ca_bundle()
     else:
         conn_params["sslmode"] = "prefer"
 
@@ -303,9 +325,10 @@ def connect_user_db(
             "and database name.",
             code="db_credentials_rejected",
         )
+    safe_err = sanitize_log_detail(err_str) if err_str else ""
     raise DatabaseUnreachableError(
         "Unable to reach user database. Check if your Neon project is active or if "
-        f"IP Allow rules restrict connections. (Error: {err_str[:100]})",
+        f"IP Allow rules restrict connections. (Error: {safe_err[:240]})",
         code="user_db_unreachable",
     )
 

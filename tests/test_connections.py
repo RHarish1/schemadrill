@@ -209,6 +209,58 @@ def test_parse_and_validate_db_url_still_rejects_private_ipv6_when_ipv4_present(
         parse_and_validate_db_url(SecretStr(url))
 
 
+def test_connect_user_db_uses_verify_full_and_existing_ca_bundle(monkeypatch):
+    import os
+    import socket
+    from types import SimpleNamespace
+
+    from app.connections.validate import (
+        ParsedConnectionInfo,
+        _resolve_system_ca_bundle,
+        connect_user_db,
+    )
+
+    captured_kwargs = {}
+
+    def fake_connect(**kwargs):
+        captured_kwargs.update(kwargs)
+        mock_conn = MagicMock()
+        return mock_conn
+
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("54.148.10.20", 5432)),
+        ],
+    )
+    monkeypatch.setattr("psycopg.connect", fake_connect)
+
+    info = ParsedConnectionInfo(
+        host="ep-cool.us-east-2.aws.neon.tech",
+        port=5432,
+        database="neondb",
+        user="reader",
+        password="pw",
+        resolved_ip="54.148.10.20",
+        is_pooler=False,
+    )
+    fake_settings = SimpleNamespace(
+        allow_private_db_hosts_for_tests=False,
+        user_db_connect_timeout_seconds=10,
+        user_db_statement_timeout_ms=15000,
+    )
+    connect_user_db(info, settings=fake_settings)
+
+    assert captured_kwargs["sslmode"] == "verify-full"
+    assert captured_kwargs["host"] == "ep-cool.us-east-2.aws.neon.tech"
+    assert captured_kwargs["hostaddr"] == "54.148.10.20"
+    assert captured_kwargs["sslrootcert"] == _resolve_system_ca_bundle()
+    # On Linux with ca-certificates installed, it resolves to an actual CA file path
+    if os.path.isfile("/etc/ssl/certs/ca-certificates.crt"):
+        assert captured_kwargs["sslrootcert"] != "system"
+        assert os.path.isfile(captured_kwargs["sslrootcert"])
+
+
 # ---------------------------------------------------------------------------
 # 3. Read-Only Privilege Checks
 # ---------------------------------------------------------------------------
