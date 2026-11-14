@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
     close_pool()
 
 
-app = FastAPI(title="SchemaDrill", version="0.6.7", lifespan=lifespan)
+app = FastAPI(title="SchemaDrill", version="0.6.8", lifespan=lifespan)
 
 
 def _derive_request_id(request: Request) -> str:

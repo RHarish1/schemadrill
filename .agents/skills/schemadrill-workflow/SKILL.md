@@ -1,16 +1,18 @@
 ---
 name: schemadrill-workflow
 description: >-
-  Engineering workflow, architectural decision logging, release SemVer
-  synchronization, pre-commit checks, and Conventional Commit standards for
-  SchemaDrill. Activate before making non-trivial design changes, bumping
-  versions, updating documentation, or preparing git commits.
+  Engineering workflow, architectural decision logging, failure/bug root-cause
+  documentation, release SemVer synchronization, pre-commit checks, and
+  Conventional Commit standards for SchemaDrill. Activate before making
+  non-trivial design changes, debugging or fixing bugs, bumping versions,
+  updating documentation, or preparing git commits.
 ---
 
 # SchemaDrill Engineering & Release Workflow
 
-Follow this workflow for non-trivial changes in SchemaDrill so architecture docs,
-version metadata, tests, and commit history stay synchronized across devices.
+Follow this workflow for non-trivial changes and bug fixes in SchemaDrill so
+architecture docs, failure postmortems, version metadata, tests, and commit
+history stay synchronized across devices.
 
 ## 1. Architecture & Design Decisions
 
@@ -25,11 +27,36 @@ version metadata, tests, and commit history stay synchronized across devices.
   - Keep typed Pydantic contracts at stage/API boundaries in `app/models.py`.
   - Keep deterministic security checks in `app/sql_guard.py` (never delegate
     SQL safety to LLM output).
+  - Use `settings.control_plane_database_url` for control-plane tables (`users`,
+    `user_datasets`, `tenant_connections`, `tenant_schema_embeddings`) while
+    keeping `app/db.py` on the read-only `DATABASE_URL` pool.
   - Use explicit PostgreSQL type casts (e.g., `%s::text`) when parameters could
     be `NULL` or appear inside polymorphic predicates, because `psycopg` v3
     uses server-side extended query binding.
 
-## 2. Documentation Sync
+## 2. Failure & Bug Root-Cause Documentation
+
+Whenever you diagnose and fix a production, runtime, security, evaluation, or
+CI/CD bug:
+
+1. **Write a regression test** that reproduces the failure condition (including
+   environment mismatches that unit mocks previously hid).
+2. **Document how it failed and how it was fixed:**
+   - **Symptom & exact error:** HTTP status, exception class, and failing module
+     or SQL statement.
+   - **Root cause & test gap:** Why it failed in production/CI and why existing
+     mocks or local Docker Compose did not catch it.
+   - **Fix & invariant:** The code/config change that permanently prevents recurrence.
+3. **Update all tracking logs in the same commit:**
+   - Add a row to the `## Bugs solved` table in [docs/changelog.md](../../../docs/changelog.md).
+   - If the failure reveals a platform or runtime gotcha (`psycopg` v3, Cloud
+     Run networking, Neon pooling/roles, `libpq` TLS, SSRF, CodeQL, evaluation),
+     record the pattern in [references/debugging-runbook.md](./references/debugging-runbook.md).
+   - If the local `notes/` directory exists, append the full breakdown to
+     `notes/failures-and-war-stories.md` and `notes/decisions/` (keep `notes/`
+     untracked).
+
+## 3. Documentation Sync
 
 Update affected docs in the same commit as the code change:
 
@@ -40,7 +67,7 @@ Update affected docs in the same commit as the code change:
 - [docs/modules.md](../../../docs/modules.md) — update runtime, pipeline, or
   CI/workflow inventory when modules or contracts change.
 
-## 3. Pre-Commit Verification
+## 4. Pre-Commit Verification
 
 Run the checks relevant to your change before committing:
 
@@ -64,7 +91,7 @@ checking:
   frontend/src/auth.ts frontend/src/services/api.ts frontend/src/types/api.ts
 ```
 
-## 4. Synchronized Release Versioning
+## 5. Synchronized Release Versioning
 
 Bump the Semantic Version (`MAJOR.MINOR.PATCH`: patch for fixes/chore/CI, minor
 for backward-compatible features, major for breaking changes) before every
@@ -77,7 +104,7 @@ commit across all three version sources:
 Add a matching timeline row (and a **Bugs solved** entry when fixing a bug) in
 [docs/changelog.md](../../../docs/changelog.md).
 
-## 5. Commit Discipline
+## 6. Commit Discipline
 
 - Use Conventional Commits:
   `<type>(<optional scope>): <imperative summary>`
