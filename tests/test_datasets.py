@@ -58,6 +58,12 @@ def test_provisioning_database_url_uses_ingest_for_readonly_role():
     assert _provisioning_database_url(managed_settings) == managed_settings.database_url
     assert managed_settings.control_plane_database_url == managed_settings.database_url
 
+    split_neon_settings = Settings(
+        database_url="postgresql://schemadrill_readonly:secret@ep-demo-pooler.c-4.aws.neon.tech/neondb",
+        ingest_database_url="postgresql://neondb_owner:secret@ep-demo.c-4.aws.neon.tech/neondb",
+    )
+    assert split_neon_settings.control_plane_database_url == split_neon_settings.ingest_database_url
+
 
 def test_provision_user_skips_ddl_when_connected_as_readonly_role(monkeypatch):
     from app.config import Settings

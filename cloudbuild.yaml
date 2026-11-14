@@ -51,7 +51,7 @@ steps:
       - "--platform"
       - "managed"
       - "--update-secrets"
-      - "DATABASE_URL=schemadrill-database-url:latest,INGEST_DATABASE_URL=schemadrill-database-url:latest,GEMINI_API_KEY=schemadrill-gemini-api-key:latest,REDIS_URL=schemadrill-redis-url:latest"
+      - "DATABASE_URL=schemadrill-database-url:latest,INGEST_DATABASE_URL=schemadrill-ingest-database-url:latest,GEMINI_API_KEY=schemadrill-gemini-api-key:latest,REDIS_URL=schemadrill-redis-url:latest"
       - "--quiet"
 
 availableSecrets:

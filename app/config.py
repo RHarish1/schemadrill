@@ -118,10 +118,9 @@ class Settings(BaseSettings):
     def control_plane_database_url(self) -> str:
         parsed_db = urlparse(self.database_url)
         parsed_ingest = urlparse(self.ingest_database_url)
-        if (
-            parsed_db.username == "schemadrill_readonly"
-            and parsed_ingest.hostname == parsed_db.hostname
-        ):
+        db_host = (parsed_db.hostname or "").replace("-pooler.", ".")
+        ingest_host = (parsed_ingest.hostname or "").replace("-pooler.", ".")
+        if parsed_db.username == "schemadrill_readonly" and ingest_host and ingest_host == db_host:
             return self.ingest_database_url
         return self.database_url
 
