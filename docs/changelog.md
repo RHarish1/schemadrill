@@ -32,7 +32,8 @@ Derived from `git log` (2026-09-26 to 2026-11-10). Hashes are abbreviated.
 | 11-13 | **v0.6.1**: **Phase 2c: Connections UI for session-held DB credentials** — in-memory + `sessionStorage`-only credential store (`dbCreds.js`), sign-out & cross-tab clearing, `X-DB-Url` attachment for user connections only, `ConnectionsModal` (honest copy, role setup/revoke SQL guide, Inspect -> schema checklist -> Connect, Reconnect/Re-ingest/Disconnect), combined Demo + Neon Connections dataset/schema picker, `403`/`409`/`503`/`504` error routing, and `change_script` card | `b701bd2` |
 | 11-13 | **v0.6.2**: **Fix Cloud Run 503 on user Neon DB connect (prefer IPv4 `hostaddr` pinning)** — validate all IPv4 and IPv6 DNS records against SSRF, then prefer `AF_INET` (IPv4) over `AF_INET6` for `hostaddr` pinning so serverless runtimes without IPv6 egress (e.g. Cloud Run) don't fail with `ENETUNREACH` | `ff0bace` |
 | 11-13 | **v0.6.3**: **Fix TLS certificate verification failure on `psycopg-binary` (`verify-full`)** — `psycopg-binary` bundles OpenSSL with `OPENSSLDIR=/usr/lib/psycopg-openssl`, causing `sslrootcert="system"` to miss Debian's `/etc/ssl/certs/ca-certificates.crt`; resolve explicit system CA bundle path while preserving `sslmode="verify-full"` and `host` SNI | `ce0a28a` |
-| 11-14 | **v0.6.4**: **Open-source release licensing** — adopt MIT License (`LICENSE`), add license documentation to `README.md`, set frontend package license metadata, and establish legal clarity for open-source contributions | this commit |
+| 11-14 | **v0.6.4**: **Open-source release licensing** — adopt MIT License (`LICENSE`), add license documentation to `README.md`, set frontend package license metadata, and establish legal clarity for open-source contributions | `4f8ac1c` |
+| 11-14 | **v0.6.5**: **Benchmark documentation & CWE-312 CodeQL remediation** — embed 2×2 Chinook ablation results (Vanilla LLM vs FK vs EXPLAIN retry) at the top of `README.md`, resolve CodeQL alert #1 by decoupling raw `apiKey` from `sessionStorage` into browser module memory only, and add ADR #22 | this commit |
 
 ## Feature inventory
 
@@ -74,3 +75,4 @@ Derived from `git log` (2026-09-26 to 2026-11-10). Hashes are abbreviated.
 | Tenancy | 500 `psycopg.errors.IndeterminateDatatype` (`$4 IS NOT NULL`) on `/api/datasets` and `/api/me` for existing users | Replace untyped `%s IS NOT NULL` with explicit `%s::text` casts inside `COALESCE` / `IS DISTINCT FROM` | `faf0bfc` |
 | Auth | JWT issuer mismatch when `/neondb/auth` suffix was configured | Accept configured issuer and normalized origin | `fb62b1d` |
 | Tenancy | Dataset id was globally unique | Composite PK `(dataset_id, user_id)` | `2bcea0a`, `231e1cb` |
+| Security (CodeQL) | Alert #1 (`js/clear-text-storage-of-sensitive-data` / CWE-312): raw `apiKey` persisted to `sessionStorage` in `frontend/src/llmKey.ts` | Hold `apiKey` strictly in JS module memory; serialize non-sensitive preferences only to `sessionStorage` | this commit |

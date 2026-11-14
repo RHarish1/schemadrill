@@ -2,15 +2,21 @@ import type { LlmModelInfo, LlmProvider } from "./types/api";
 
 const SESSION_STORAGE_KEY = "schemadrill:byok_session";
 
-interface StoredKeyState {
-  apiKey: string;
+/** Non-sensitive model and provider preferences persisted to sessionStorage. */
+interface StoredPreferences {
   provider: LlmProvider;
   model: string;
   fallbackModel: string;
   models: LlmModelInfo[];
 }
 
-let inMemoryState: StoredKeyState | null = null;
+/** Active in-memory state. Sensitive apiKey is held in closure memory only (CWE-312 mitigation). */
+interface ActiveKeyState extends StoredPreferences {
+  apiKey: string;
+}
+
+let inMemoryState: ActiveKeyState | null = null;
+let inMemoryPreferences: StoredPreferences | null = null;
 const changeListeners = new Set<() => void>();
 
 function notifyChange(): void {
@@ -19,17 +25,13 @@ function notifyChange(): void {
   }
 }
 
-function readFromSessionStorage(): StoredKeyState | null {
+function readFromSessionStorage(): StoredPreferences | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredKeyState>;
-    if (typeof parsed.apiKey !== "string" || !parsed.apiKey.trim()) {
-      return null;
-    }
+    const parsed = JSON.parse(raw) as Partial<StoredPreferences>;
     return {
-      apiKey: parsed.apiKey,
       provider: parsed.provider === "gemini" ? "gemini" : "gemini",
       model: typeof parsed.model === "string" ? parsed.model : "",
       fallbackModel: typeof parsed.fallbackModel === "string" ? parsed.fallbackModel : "",
@@ -40,43 +42,52 @@ function readFromSessionStorage(): StoredKeyState | null {
   }
 }
 
-function writeToSessionStorage(state: StoredKeyState | null): void {
+function writeToSessionStorage(prefs: StoredPreferences | null): void {
   if (typeof window === "undefined") return;
   try {
-    if (!state) {
+    if (!prefs) {
       window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
     } else {
-      window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
+      // Store non-sensitive preferences only; apiKey is never persisted to web storage.
+      window.sessionStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify({
+          provider: prefs.provider,
+          model: prefs.model,
+          fallbackModel: prefs.fallbackModel,
+          models: prefs.models,
+        })
+      );
     }
   } catch {
     // Ignore sessionStorage failures in restricted browser contexts.
   }
 }
 
-function ensureHydrated(): StoredKeyState | null {
-  if (inMemoryState !== null) return inMemoryState;
-  inMemoryState = readFromSessionStorage();
-  return inMemoryState;
+function ensurePreferencesHydrated(): StoredPreferences | null {
+  if (inMemoryPreferences !== null) return inMemoryPreferences;
+  inMemoryPreferences = readFromSessionStorage();
+  return inMemoryPreferences;
 }
 
 export function getLlmApiKey(): string | null {
-  return ensureHydrated()?.apiKey ?? null;
+  return inMemoryState?.apiKey ?? null;
 }
 
 export function getLlmProvider(): LlmProvider {
-  return ensureHydrated()?.provider ?? "gemini";
+  return inMemoryState?.provider ?? ensurePreferencesHydrated()?.provider ?? "gemini";
 }
 
 export function getSelectedLlmModel(): string {
-  return ensureHydrated()?.model ?? "";
+  return inMemoryState?.model ?? ensurePreferencesHydrated()?.model ?? "";
 }
 
 export function getSelectedFallbackModel(): string {
-  return ensureHydrated()?.fallbackModel ?? "";
+  return inMemoryState?.fallbackModel ?? ensurePreferencesHydrated()?.fallbackModel ?? "";
 }
 
 export function getAvailableLlmModels(): LlmModelInfo[] {
-  return ensureHydrated()?.models ?? [];
+  return inMemoryState?.models ?? ensurePreferencesHydrated()?.models ?? [];
 }
 
 export function getKeyLast4(key?: string | null): string | null {
@@ -98,31 +109,43 @@ export function setLlmKeySession(params: {
     return;
   }
   const defaultModel = params.model || params.models[0]?.id || "";
-  inMemoryState = {
-    apiKey: cleanKey,
+  const preferences: StoredPreferences = {
     provider: params.provider ?? "gemini",
     model: defaultModel,
     fallbackModel: params.fallbackModel ?? "",
     models: params.models,
   };
-  writeToSessionStorage(inMemoryState);
+  inMemoryState = {
+    ...preferences,
+    apiKey: cleanKey,
+  };
+  inMemoryPreferences = preferences;
+  writeToSessionStorage(preferences);
   notifyChange();
 }
 
 export function updateLlmModelSelection(model: string, fallbackModel: string): void {
-  const current = ensureHydrated();
-  if (!current) return;
-  inMemoryState = {
-    ...current,
+  const currentPrefs = inMemoryPreferences ?? ensurePreferencesHydrated();
+  const updatedPrefs: StoredPreferences = {
+    provider: currentPrefs?.provider ?? "gemini",
     model,
     fallbackModel: fallbackModel === model ? "" : fallbackModel,
+    models: currentPrefs?.models ?? [],
   };
-  writeToSessionStorage(inMemoryState);
+  if (inMemoryState) {
+    inMemoryState = {
+      ...inMemoryState,
+      ...updatedPrefs,
+    };
+  }
+  inMemoryPreferences = updatedPrefs;
+  writeToSessionStorage(updatedPrefs);
   notifyChange();
 }
 
 export function clearLlmKey(): void {
   inMemoryState = null;
+  inMemoryPreferences = null;
   writeToSessionStorage(null);
   notifyChange();
 }
