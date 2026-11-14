@@ -331,3 +331,8 @@ selection, and optional model fallback.
 | `LLM_KEY_FINGERPRINT_PEPPER` | `""` | Server pepper for HMAC-SHA256 model-list cache keys |
 | `QUERY_DEADLINE_SECONDS` | `90.0` | End-to-end monotonic query deadline |
 | `MAX_TOTAL_PROVIDER_CALLS` | `12` | Max total provider calls per request (including fallback) |
+
+## License
+
+This project is open-source software licensed under the [MIT License](LICENSE).
+
