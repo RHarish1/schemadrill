@@ -118,3 +118,22 @@ def test_incomplete_usage_metadata_is_not_invented(monkeypatch):
     assert records[0]["output_tokens"] is None
     assert records[0]["estimated_cost"] is None
     assert records[0]["retry_count"] == 1
+
+
+def test_failed_pipeline_status_aggregates_without_key_error():
+    config = {"name": "test", "disable_self_correction": False, "enable_fk_expansion": False}
+    records = run_configuration(
+        [{"question_id": "q1", "db": "ecommerce", "question": "fail", "gold_sql": "SELECT 1"}],
+        "ecommerce",
+        config,
+        pipeline=lambda *args, **kwargs: QueryResult(
+            status="failed",
+            reason="You do not have access to the requested data.",
+            attempts=3,
+        ),
+    )
+    summary = aggregate_records(records, "ecommerce", config)
+    assert summary["result_set_accuracy"] == 0.0
+    assert summary["sql_execution_success_rate"] == 0.0
+    assert summary["failure_breakdown"] == {"pipeline_failure": 1}
+    assert summary["mean_retries"] == 2.0

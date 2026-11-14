@@ -49,12 +49,14 @@ def test_provisioning_database_url_uses_ingest_for_readonly_role():
         ingest_database_url="postgresql://schemadrill_admin:schemadrill@db:5432/schemadrill",
     )
     assert _provisioning_database_url(local_settings) == local_settings.ingest_database_url
+    assert local_settings.control_plane_database_url == local_settings.ingest_database_url
 
     managed_settings = Settings(
         database_url="postgresql://neondb_owner:secret@ep-demo.neon.tech/neondb",
         ingest_database_url="postgresql://schemadrill_admin:schemadrill@localhost:5432/schemadrill",
     )
     assert _provisioning_database_url(managed_settings) == managed_settings.database_url
+    assert managed_settings.control_plane_database_url == managed_settings.database_url
 
 
 def test_provision_user_skips_ddl_when_connected_as_readonly_role(monkeypatch):

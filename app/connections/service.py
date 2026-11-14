@@ -66,7 +66,7 @@ def reap_expired_and_stale_connections(settings: Settings | None = None) -> None
     """
     settings = settings or get_settings()
     try:
-        with psycopg.connect(settings.ingest_database_url, autocommit=True) as conn:
+        with psycopg.connect(settings.control_plane_database_url, autocommit=True) as conn:
             with conn.cursor() as cur:
                 # 1. Delete expired
                 cur.execute(
@@ -127,7 +127,7 @@ def create_and_ingest_connection(
         )
 
     # Check connection count limit
-    with psycopg.connect(settings.ingest_database_url) as admin_conn:
+    with psycopg.connect(settings.control_plane_database_url) as admin_conn:
         with admin_conn.cursor() as cur:
             cur.execute(
                 """
@@ -168,7 +168,7 @@ def create_and_ingest_connection(
     try:
         with connect_user_db(info, settings=settings) as user_conn:
             verify_readonly_role(user_conn, info.user, schemas, database=info.database)
-            with psycopg.connect(settings.ingest_database_url) as admin_conn:
+            with psycopg.connect(settings.control_plane_database_url) as admin_conn:
                 table_count = ingest_user_schemas(
                     admin_conn=admin_conn,
                     user_conn=user_conn,
@@ -208,7 +208,7 @@ def create_and_ingest_connection(
         )
     except Exception:
         # Mark as failed and delete partial embeddings
-        with psycopg.connect(settings.ingest_database_url) as admin_conn:
+        with psycopg.connect(settings.control_plane_database_url) as admin_conn:
             with admin_conn.cursor() as cur:
                 cur.execute(
                     """
@@ -236,7 +236,7 @@ def list_connections(
     reap_expired_and_stale_connections(settings)
     now = datetime.datetime.now(datetime.UTC)
 
-    with psycopg.connect(settings.ingest_database_url) as conn:
+    with psycopg.connect(settings.control_plane_database_url) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -285,7 +285,7 @@ def get_connection(
         raise ConnectionNotFoundError("Connection not found") from err
 
     now = datetime.datetime.now(datetime.UTC)
-    with psycopg.connect(settings.ingest_database_url) as conn:
+    with psycopg.connect(settings.control_plane_database_url) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -328,7 +328,7 @@ def reingest_connection(
     reap_expired_and_stale_connections(settings)
 
     # 1. Look up existing connection for this user_id
-    with psycopg.connect(settings.ingest_database_url) as admin_conn:
+    with psycopg.connect(settings.control_plane_database_url) as admin_conn:
         with admin_conn.cursor() as cur:
             cur.execute(
                 """
@@ -378,7 +378,7 @@ def reingest_connection(
     try:
         with connect_user_db(info, settings=settings) as user_conn:
             verify_readonly_role(user_conn, info.user, schemas, database=info.database)
-            with psycopg.connect(settings.ingest_database_url) as admin_conn:
+            with psycopg.connect(settings.control_plane_database_url) as admin_conn:
                 # Delete existing embeddings in a transaction before inserting new ones
                 with admin_conn.cursor() as cur:
                     cur.execute(
@@ -428,7 +428,7 @@ def reingest_connection(
             needs_credentials=True,
         )
     except Exception:
-        with psycopg.connect(settings.ingest_database_url) as admin_conn:
+        with psycopg.connect(settings.control_plane_database_url) as admin_conn:
             with admin_conn.cursor() as cur:
                 cur.execute(
                     """
@@ -448,7 +448,7 @@ def delete_connection(
     settings: Settings | None = None,
 ) -> bool:
     settings = settings or get_settings()
-    with psycopg.connect(settings.ingest_database_url) as admin_conn:
+    with psycopg.connect(settings.control_plane_database_url) as admin_conn:
         with admin_conn.cursor() as cur:
             # Delete connection row. Embeddings cascade via foreign key constraint.
             cur.execute(

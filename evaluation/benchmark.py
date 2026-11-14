@@ -250,6 +250,19 @@ def run_configuration(
                     retry_count=max(result.attempts - 1, 0),
                 )
                 record["failure_category"] = "pipeline_failure"
+                record.update(
+                    dataset=dataset,
+                    input_tokens=None,
+                    output_tokens=None,
+                    estimated_cost=None,
+                    evaluation_time_ms=None,
+                    comparison_time_ms=None,
+                    pipeline_latency_ms=telemetry_span_duration(telemetry, "pipeline"),
+                    evaluation_overhead_ms=None,
+                    spans=telemetry.spans,
+                    model_calls=telemetry.model_calls,
+                    retrieval=telemetry.retrieval or None,
+                )
             else:
                 evaluation = evaluate_sql_pair(
                     question_id, question["gold_sql"], generated_sql, _readonly_connection

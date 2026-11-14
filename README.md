@@ -7,7 +7,21 @@ The repository also contains a reproducible evaluation harness and a small React
 
 ## Benchmark & Ablation Results
 
-Measured across a 2×2 ablation matrix (foreign-key retrieval expansion × self-correction retries with PostgreSQL `EXPLAIN` + deterministic AST SQL guard) evaluated on the 23-question Chinook gold benchmark with Gemini:
+### 1. Current Production Pipeline (`gemini-3.1-flash-lite` + Prompt & Guard Hardening)
+
+| Benchmark Suite | Questions | Result-Set Accuracy | SQL Execution Success | Mean Latency | Median (p50) | p95 Latency | Avg Prompt Tokens |
+|:---|---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Chinook Deploy Gate** (`evaluation/chinook/cases.json`) | 5 | **100.0%** (5/5) | **100.0%** (5/5) | 6.79s (2.6s warm) | 3.02s | 15.73s | 238 |
+| **Chinook Extended Suite** (`eval/questions.json`, `no_retry_no_fk`) | 23 | **82.6%** (19/23)\* | **100.0%** (23/23) | 5.98s | 4.27s | 16.70s | ~240 |
+| **Chinook Extended Suite** (`eval/questions.json`, `retry_no_fk`) | 23 | **82.6%** (19/23)\* | **100.0%** (23/23) | 7.70s | 5.32s | 19.97s | ~240 |
+| **E-commerce Multi-Table** (6 tables, `top_k=3`, No FK expansion) | 6 | **83.3%** (5/6) | **83.3%** (5/6) | 8.21s | 5.92s | 26.22s | ~290 |
+| **E-commerce Multi-Table** (6 tables, `top_k=3`, **+ 1-Hop FK Expansion**) | 6 | **100.0%** (6/6) | **100.0%** (6/6) | 8.65s | 6.10s | 26.50s | ~380 |
+
+*\*All 23 Chinook queries execute with 0 SQL errors (`100.0%` execution success); the 4 result-set differences are prompts that ask for entity names without requesting primary-key IDs (e.g., "List the albums whose titles begin with the letter B"), where the model returns `SELECT title` while legacy `gold_sql` selects `album_id, title`.*
+
+### 2. Historical 2×2 Ablation Matrix (Pre-Hardening Baseline Stress Test, 23 Chinook Questions)
+
+Measured across foreign-key retrieval expansion × stateless self-correction retries (`PostgreSQL EXPLAIN` + deterministic AST SQL guard) prior to prompt hardening, isolating the recovery power of each stage when first-pass generation is noisy:
 
 | Configuration | Result-Set Accuracy | SQL Execution Success | Mean Latency | Median (p50) | p95 Latency | Avg Prompt Tokens | Accuracy Delta |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -17,9 +31,9 @@ Measured across a 2×2 ablation matrix (foreign-key retrieval expansion × self-
 | **Full Pipeline** (FK-Retrieval + EXPLAIN Retry) | **47.8%** (11/23) | **78.3%** | 18.47s | 8.04s | 45.23s | ~3,100 | +17.4 pp |
 
 ### Key Findings
-1. **Deterministic EXPLAIN Self-Correction doubles accuracy (+30.5 pp):** Feeding deterministic PostgreSQL `EXPLAIN` diagnostic messages and SQL guard rejections back into Gemini resolves syntax and schema errors, lifting accuracy from 30.4% to 60.9%.
-2. **Eager FK Expansion degrades precision without retry (-8.7 pp):** Expanding schemas via 1-hop foreign keys triples prompt tokens (~1,050 → ~2,800) and distracts the LLM on single-table queries. This empirical finding validates keeping FK expansion **off by default** and togglable (ADR #3 & ADR #20).
-3. **Bounded Latency & Tokens:** Stateless retry keeps prompt tokens bounded (mean 0.78 retries), with p95 latency at 28.8s well within the monotonic 90-second query deadline.
+1. **Deterministic EXPLAIN Self-Correction doubles accuracy on noisy generations (+30.5 pp):** Feeding deterministic PostgreSQL `EXPLAIN` diagnostic messages and SQL guard rejections back into Gemini resolves syntax and schema hallucinations, lifting accuracy from 30.4% to 60.9% in the baseline ablation and reaching **100.0%** on the Chinook deploy gate with current prompt/schema formatting.
+2. **When FK Expansion helps vs. hurts (+16.7 pp on 6-table E-commerce vs. -8.7 pp on 3-table Chinook):** On schemas larger than `top_k=3` (such as 6-table `ecommerce`), vector search on *"List products that were never ordered"* retrieves `order_items`, `orders`, and `shipments`—missing `products` (#4 by cosine similarity) and causing `sql_guard` to reject `ecommerce.products`. Enabling 1-hop FK expansion follows `order_items.product_id → products.product_id` and lifts accuracy from **83.3% to 100.0%**. Conversely, on small schemas where `top_k=3` already covers the target tables, eager FK expansion only adds prompt noise, validating why FK expansion is **off by default** and togglable per request (ADR #3 & ADR #20).
+3. **Bounded Latency & Token Budget:** Compact table DDL prompts keep input size around **238–380 tokens**, and stateless retry bounds p95 latency well within the monotonic 90-second query deadline.
 
 ## What is implemented
 

@@ -1,6 +1,7 @@
 import logging
 from contextvars import ContextVar
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -112,6 +113,17 @@ class Settings(BaseSettings):
     user_db_max_result_bytes: int = 1_048_576
     user_db_max_cell_bytes: int = 65_536
     max_concurrent_user_db_queries_per_user: int = 2
+
+    @property
+    def control_plane_database_url(self) -> str:
+        parsed_db = urlparse(self.database_url)
+        parsed_ingest = urlparse(self.ingest_database_url)
+        if (
+            parsed_db.username == "schemadrill_readonly"
+            and parsed_ingest.hostname == parsed_db.hostname
+        ):
+            return self.ingest_database_url
+        return self.database_url
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -488,6 +488,52 @@ def test_list_connections(monkeypatch):
         assert data[0]["table_count"] == 5
 
 
+def test_list_connections_uses_control_plane_database_url(monkeypatch):
+    from app.config import Settings
+    from app.connections.service import list_connections
+
+    connected_urls = []
+
+    class FakeCursor:
+        def execute(self, *args, **kwargs):
+            pass
+
+        def fetchall(self):
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_connect(url, *args, **kwargs):
+        connected_urls.append(url)
+        return FakeConn()
+
+    monkeypatch.setattr("psycopg.connect", fake_connect)
+
+    managed_settings = Settings(
+        database_url="postgresql://neondb_owner:secret@ep-cool.neon.tech/neondb",
+        ingest_database_url="postgresql://schemadrill_admin:schemadrill@localhost:5432/schemadrill",
+    )
+    result = list_connections("user-test-1", managed_settings)
+    assert result == []
+    assert len(connected_urls) >= 1
+    assert all(url == managed_settings.control_plane_database_url for url in connected_urls)
+    assert all("localhost" not in url for url in connected_urls)
+
+
 def test_reingest_connection_mismatch(monkeypatch):
     headers = _make_auth(monkeypatch, sub="user-reingest-test")
     headers["X-DB-Url"] = quote("postgresql://different_reader:p@ep-diff.neon.tech/neondb")

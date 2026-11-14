@@ -79,7 +79,7 @@ class TenantPgVectorRetrievalProvider:
             ORDER BY embedding <=> %s::vector
             LIMIT %s
         """
-        with psycopg.connect(self.settings.ingest_database_url) as connection:
+        with psycopg.connect(self.settings.control_plane_database_url) as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     query,
@@ -116,7 +116,7 @@ class TenantPgVectorRetrievalProvider:
             WHERE connection_id = %s AND user_id = %s AND schema_name = %s
             ORDER BY table_name
         """
-        with psycopg.connect(self.settings.ingest_database_url) as connection:
+        with psycopg.connect(self.settings.control_plane_database_url) as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(query, (self.connection_id, self.user_id, db))
                 rows = cursor.fetchall()

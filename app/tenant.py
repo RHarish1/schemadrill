@@ -25,14 +25,7 @@ _DEFAULT_DATASETS = (
 
 
 def _provisioning_database_url(settings: Settings) -> str:
-    parsed_db = urlparse(settings.database_url)
-    parsed_ingest = urlparse(settings.ingest_database_url)
-    if (
-        parsed_db.username == "schemadrill_readonly"
-        and parsed_ingest.hostname == parsed_db.hostname
-    ):
-        return settings.ingest_database_url
-    return settings.database_url
+    return settings.control_plane_database_url
 
 
 def _is_readonly_role(database_url: str) -> bool:
