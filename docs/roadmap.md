@@ -31,7 +31,7 @@ flowchart TD
 | 2 | **Connect your Neon database** | **Shipped** | Session-held credentials via `X-DB-Url`, SSRF validation matrix, read-only check, exact schema vector store, per-request user-DB execution (`v0.6.0`–`v0.6.7`) |
 | 3 | **BYOK (multi-provider)** | **Phase 1 Shipped** | Browser-held keys (`sessionStorage`), multi-model fallback, sticky routing, rate limiting (`v0.5.0`) |
 | 4 | **Run SQL through the website** | **Shipped** | Runs on curated shared datasets and user-connected Neon databases (`v0.6.0`), with `change_script` mode for mutations |
-| 5 | **Search interface and dataset selector** | **Shipped** | Combined Demo + Neon Connections dataset & schema selector (`v0.6.1`) |
+| 5 | **Search interface and dataset selector** | **Shipped** | Combined Demo + Neon Connections dataset & schema selector, responsive layout, dark-themed controls (`v0.6.1`, `v0.7.1`) |
 | 6 | **CSV / PDF export** | **Shipped** | Client-side CSV export with formula-injection protection + zero-dependency multi-page PDF 1.4 report export (`v0.7.0`) |
 | 7 | **CSV / Excel upload** | Planned | New tables first |
 

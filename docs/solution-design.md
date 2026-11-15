@@ -354,3 +354,8 @@ bill without needing user databases.
   - Client-side PDF generation keeps Cloud Run CPU, memory, and container image size unchanged while avoiding third-party npm supply-chain/audit churn (`jspdf` / `html2canvas`).
   - Prefixing formula-trigger characters prevents spreadsheet execution (CWE-1236) when users open exported query results in Excel or Google Sheets.
 - **Alternatives considered:** Server-side ReportLab/WeasyPrint endpoint (rejected: adds backend dependencies, increases Cloud Run CPU/egress, and requires re-sending or caching result rows on the server); `jspdf` + `jspdf-autotable` npm packages (rejected: adds external bundle weight and transitive dependency surface for a layout that standard PDF 1.4 Type1 primitives handle cleanly in ~300 lines of TypeScript).
+
+## 18. Dark-theme form controls and fluid responsive layout (shipped in v0.7.1)
+
+- **Decision:** Enforce `color-scheme: dark` on `:root`, style all `<select>`, `<option>`, `<optgroup>`, `<input>`, and `ConnectionsModal` elements (`.guide-toggle-btn`, `.btn-primary`, `.btn-secondary`, `.btn-danger`, `.connection-item`), and widen `.app-shell` with fluid `clamp()` sizing and a `960px` two-column-to-single-column workspace breakpoint in [styles.css](../frontend/src/styles.css).
+- **Why:** Explicit dark-mode CSS and `color-scheme: dark` eliminate white native browser buttons, `<select>` option popups, and text/password inputs on dark surfaces, while fluid `clamp()` sizing and a `960px` breakpoint prevent horizontal overflow and cramped multi-column panels across desktop, tablet, and mobile viewports.
