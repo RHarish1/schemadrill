@@ -5,8 +5,9 @@ from pydantic import BaseModel, Field
 
 
 class SqlResponse(BaseModel):
-    sql: str = Field(min_length=1)
-    intent: Literal["read", "change"] = "read"
+    sql: str = ""
+    intent: Literal["read", "change", "irrelevant", "needs_detail"] = "read"
+    message: str | None = None
 
 
 class AuthenticatedUser(BaseModel):

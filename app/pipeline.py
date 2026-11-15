@@ -7,8 +7,10 @@ from typing import Literal, Protocol
 from urllib.parse import unquote, urlparse
 
 import psycopg
+import sqlglot
 from psycopg import Error as PsycopgError
 from pydantic import SecretStr
+from sqlglot import exp
 
 from app.config import (
     Settings,
@@ -55,7 +57,46 @@ class _RetryStage(Exception):
 
 
 class _TerminalStage(Exception):
-    pass
+    def __init__(
+        self,
+        reason: str,
+        *,
+        hint_code: str | None = None,
+        hint_message: str | None = None,
+        clear_sql: bool = False,
+    ) -> None:
+        super().__init__(reason)
+        self.hint_code = hint_code
+        self.hint_message = hint_message
+        self.clear_sql = clear_sql
+
+
+def _is_obviously_unintelligible(question: str) -> bool:
+    return sum(1 for ch in question if ch.isalnum()) < 2
+
+
+def _available_tables_hint(blocks: list) -> str | None:
+    names: list[str] = []
+    for block in blocks:
+        name = getattr(block, "table_name", None)
+        if name and name not in names:
+            names.append(name)
+    if not names:
+        return None
+    return f"Available tables in this schema: {', '.join(names[:6])}."
+
+
+def _is_tableless_literal_reply(sql: str, referenced_tables: list[str]) -> bool:
+    """Catch LLM chat-fallback queries like SELECT 'I am an AI...' with no tables."""
+    if referenced_tables or not sql.strip():
+        return False
+    try:
+        parsed = sqlglot.parse_one(sql, read="postgres")
+    except Exception:
+        return False
+    return any(
+        isinstance(lit, exp.Literal) and lit.is_string for lit in parsed.find_all(exp.Literal)
+    )
 
 
 def _provider_error_summary(error: Exception) -> str:
@@ -245,6 +286,20 @@ def build_pipeline_stages(
                     "response_parse_ms": None,
                 }
             )
+        if response.intent in ("irrelevant", "needs_detail") or not response.sql.strip():
+            hint_code = "irrelevant_query" if response.intent == "irrelevant" else "needs_detail"
+            default_msg = (
+                "Please ask a question relevant to the selected database."
+                if hint_code == "irrelevant_query"
+                else "Please clarify what you'd like to look up in the selected database."
+            )
+            message = (response.message or "").strip() or default_msg
+            raise _TerminalStage(
+                message,
+                hint_code=hint_code,
+                hint_message=_available_tables_hint(state.retrieved_ddl),
+                clear_sql=True,
+            )
         state.last_sql = response.sql
         return state
 
@@ -341,6 +396,39 @@ def build_pipeline_stages(
                     details=validation_checks,
                 )
             raise _RetryStage(kind, guard_result.user_facing_message or "Security policy rejection")
+
+        if guard_result.intent == "read" and _is_tableless_literal_reply(
+            guard_result.sql or "", guard_result.referenced_tables
+        ):
+            validation_ms = (time.perf_counter() - started) * 1000
+            msg = "Please ask a question relevant to the selected database."
+            if trace is not None:
+                trace.record_validation(
+                    attempt=state.attempt,
+                    duration_ms=validation_ms,
+                    allowed=False,
+                    statement_type=guard_result.statement_type,
+                    limit_injected=False,
+                    dry_run_passed=False,
+                    rejection_reason="tableless_literal_reply",
+                )
+                trace.record_stage(
+                    "SQL validation",
+                    status="failed",
+                    duration_ms=validation_ms,
+                    details={
+                        "summary": "Query did not reference any database tables.",
+                        "sql_syntax": "passed",
+                        "read_only_policy": "failed",
+                        "dry_run": "skipped",
+                    },
+                )
+            raise _TerminalStage(
+                msg,
+                hint_code="irrelevant_query",
+                hint_message=_available_tables_hint(state.retrieved_ddl),
+                clear_sql=True,
+            )
 
         state.last_sql = guard_result.sql
         result["intent"] = guard_result.intent
@@ -614,6 +702,14 @@ def run_pipeline(
                 "Provided credentials do not match stored connection host, database, or role."
             )
 
+    if _is_obviously_unintelligible(question):
+        return QueryResult(
+            status="failed",
+            reason="Please enter a clearer question about the selected database.",
+            attempts=0,
+            hint_code="needs_detail",
+        )
+
     trace_token = set_current_trace(internal_trace)
 
     state = RetryState(question=question, attempt=1)
@@ -686,17 +782,19 @@ def run_pipeline(
                     internal_trace.log_internal_telemetry(status="failed")
                     public_trace = build_public_execution_trace(internal_trace, finalize=True)
                     stale = bool(result.get("stale_schema_error"))
+                    hint_code = error.hint_code or ("schema_maybe_stale" if stale else None)
+                    hint_message = error.hint_message or (
+                        "Schema may have changed since ingestion. Re-ingest this connection."
+                        if stale
+                        else None
+                    )
                     return QueryResult(
                         status="failed",
-                        sql=state.last_sql,
+                        sql=None if error.clear_sql else state.last_sql,
                         reason=str(error),
                         attempts=attempt,
-                        hint_code="schema_maybe_stale" if stale else None,
-                        hint_message=(
-                            "Schema may have changed since ingestion. Re-ingest this connection."
-                            if stale
-                            else None
-                        ),
+                        hint_code=hint_code,
+                        hint_message=hint_message,
                         execution_trace=public_trace,
                     )
                 finally:

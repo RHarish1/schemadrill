@@ -917,12 +917,21 @@ function ResultsPanel({
       error.code === "db_credentials_required" || error.code === "connection_mismatch";
     const isStaleSchema =
       error.code === "schema_stale" || error.hintCode === "schema_maybe_stale";
+    const isIrrelevantQuery = error.hintCode === "irrelevant_query";
+    const isNeedsDetail = error.hintCode === "needs_detail";
+    const isQueryGuidance = isIrrelevantQuery || isNeedsDetail;
     const isTransientDbError = error.status === 503 || error.status === 504;
 
+    const heading = isIrrelevantQuery
+      ? "Question doesn’t match this database"
+      : isNeedsDetail
+        ? "Could you make that a bit clearer?"
+        : "Couldn’t run that query";
+
     return (
-      <section className={`answer-panel centered error-state ${error.executionTrace ? "has-trace" : ""}`}>
-        <span className="error-icon">!</span>
-        <h2>Couldn’t run that query</h2>
+      <section className={`answer-panel centered ${isQueryGuidance ? "warning-state" : "error-state"} ${error.executionTrace ? "has-trace" : ""}`}>
+        <span className={isQueryGuidance ? "warning-icon" : "error-icon"}>!</span>
+        <h2>{heading}</h2>
         <p>{error.message}</p>
         {error.hintMessage && <p className="error-hint">{error.hintMessage}</p>}
         {isTransientDbError && (
