@@ -10,6 +10,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-
 .nav { min-height: 76px; padding: 14px 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; border-bottom: 1px solid #223036; }
 .logo { display: flex; gap: 10px; align-items: center; color: #f2f7f6; text-decoration: none; font: 600 18px "Space Grotesk"; letter-spacing: -.05em; }
 .logo-mark { display: grid; width: 30px; height: 30px; place-items: center; color: #162014; background: #d8f36b; border-radius: 8px; font: 700 17px "Space Grotesk"; }
+.logo-mark-img { width: 32px; height: 32px; border-radius: 8px; object-fit: cover; border: 1px solid rgba(216, 243, 107, .3); box-shadow: 0 2px 10px rgba(0, 0, 0, .35); }
 .lime, h1 span { color: #d8f36b; }
 .nav-right { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 14px; color: #849399; font: 12px "DM Mono"; }
 .nav-right a { color: #adb8ba; text-decoration: none; white-space: nowrap; }
@@ -101,7 +102,8 @@ kbd { padding: 2px 5px; border: 1px solid #324148; border-radius: 3px; color: #a
 .centered { display: grid; place-content: center; text-align: center; }
 .centered h2, .empty-state h2 { margin: 17px 0 0; font: 500 19px "Space Grotesk"; }
 .centered p { max-width: 290px; margin: 11px auto 0; color: #79878d; font-size: 13px; line-height: 1.5; }
-.empty-icon { display: grid; width: 66px; height: 66px; margin: 0 auto; place-items: center; color: #d8f36b; border: 1px solid #374b45; border-radius: 50%; font-size: 31px; }
+.empty-icon { display: grid; width: 68px; height: 68px; margin: 0 auto; place-items: center; color: #d8f36b; border: 1px solid #374b45; border-radius: 50%; font-size: 31px; overflow: hidden; background: #0c1115; }
+.empty-logo-img { width: 52px; height: 52px; object-fit: contain; border-radius: 10px; }
 .empty-line { width: 38px; height: 1px; margin: 28px auto 0; background: #d8f36b; }
 .loader { width: 34px; height: 34px; margin: 0 auto; border-width: 3px; border-color: #30443c; border-top-color: #d8f36b; }
 .error-icon { display: grid; width: 40px; height: 40px; margin: 0 auto; place-items: center; color: #ff9c8b; border: 1px solid #78463f; border-radius: 50%; font: 600 20px "Space Grotesk"; }

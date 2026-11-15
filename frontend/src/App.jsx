@@ -516,7 +516,7 @@ function App() {
     <div className="app-shell">
       <header className="nav">
         <a className="logo" href="/" aria-label="SchemaDrill home">
-          <span className="logo-mark">S</span>
+          <img className="logo-mark-img" src="/logo-mark.jpg" alt="" />
           <span>Schema<span className="lime">Drill</span></span>
         </a>
         <div className="nav-right">
@@ -1006,7 +1006,7 @@ function ResultsPanel({
       </section>
     );
   }
-  if (!result) return <section className="answer-panel centered"><div className="empty-icon">⌁</div><h2>Your answer will appear here</h2><p>Ask a question to generate a query and explore your data.</p><div className="empty-line" /></section>;
+  if (!result) return <section className="answer-panel centered"><div className="empty-icon"><img className="empty-logo-img" src="/logo-mark.jpg" alt="" /></div><h2>Your answer will appear here</h2><p>Ask a question to generate a query and explore your data.</p><div className="empty-line" /></section>;
   return <Result result={result} />;
 }
 

@@ -1,5 +1,9 @@
 # SchemaDrill
 
+<p align="center">
+  <img src="docs/assets/schemadrill-banner.jpg" alt="SchemaDrill — Natural Language to Safe Read-Only SQL" width="720" />
+</p>
+
 SchemaDrill is a PostgreSQL text-to-SQL service. It retrieves the relevant database
 schema, asks Gemini to generate a read-only query, validates that query with a
 deterministic SQL guard and PostgreSQL `EXPLAIN`, then executes it with bounded retries.
