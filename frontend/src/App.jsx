@@ -25,6 +25,7 @@ import { clearLlmKey, getKeyLast4, getSelectedLlmModel, onLlmKeyChange } from ".
 import ConnectionsModal from "./components/ConnectionsModal";
 import ExecutionTraceDrawer from "./components/ExecutionTraceDrawer";
 import SettingsModal from "./components/SettingsModal";
+import { downloadCsvFile, downloadPdfReport } from "./utils/export";
 import "./styles.css";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -475,6 +476,13 @@ function App() {
           dataset: selectedConnection
             ? `${selectedConnection.label} (${selectedSchema})`
             : selectedDataset?.label || dataset,
+          queryOptions: {
+            topK,
+            fkExpansion,
+            maxRetries,
+            tier: usingByok ? "BYOK (User API Key)" : "Free tier",
+            requestedModel: usingByok ? activeByokModel || null : null,
+          },
         });
       }
     } catch (requestError) {
@@ -1010,8 +1018,6 @@ function Result({ result }) {
   const sql = result.sql || "";
   const isChangeScript = result.kind === "change_script" || result.executed === false;
   const warnings = result.warnings || [];
-  const csv = useMemo(() => [columns, ...rows.map((row) => columns.map((column) => row[column]))]
-    .map((line) => line.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n"), [columns, rows]);
 
   async function copySql() {
     if (!sql) return;
@@ -1020,12 +1026,25 @@ function Result({ result }) {
     window.setTimeout(() => setCopied(false), 1600);
   }
 
-  function downloadCsv() {
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    link.download = "schemadrill-results.csv";
-    link.click();
-    URL.revokeObjectURL(link.href);
+  function handleDownloadCsv() {
+    downloadCsvFile(columns, rows, "schemadrill-results.csv");
+  }
+
+  function handleDownloadPdf() {
+    downloadPdfReport(
+      {
+        question: result.question,
+        dataset: result.dataset || "chinook",
+        sql,
+        columns,
+        rows,
+        attempts: result.attempts,
+        status: result.status,
+        queryOptions: result.queryOptions || null,
+        executionTrace: result.execution_trace || null,
+      },
+      "schemadrill-results.pdf",
+    );
   }
 
   if (isChangeScript) {
@@ -1051,7 +1070,7 @@ function Result({ result }) {
         )}
         <div className="sql-heading">
           <span className="block-label">GENERATED CHANGE SCRIPT</span>
-          <button onClick={copySql} disabled={!sql}>{copied ? "Copied" : "Copy SQL"}</button>
+          <button type="button" onClick={copySql} disabled={!sql}>{copied ? "Copied" : "Copy SQL"}</button>
         </div>
         <pre className="sql">{sql || "SQL was not returned by the API."}</pre>
         {result.execution_trace && (
@@ -1067,9 +1086,19 @@ function Result({ result }) {
 
   return <section className="answer-panel result-panel">
     <div className="answer-heading"><div><span className="success-label"><i /> QUERY COMPLETE</span><h2>Here’s what we found</h2></div><span className="attempts">{result.attempts} attempt{result.attempts === 1 ? "" : "s"}</span></div>
-    <div className="result-toolbar"><span>{rows.length} row{rows.length === 1 ? "" : "s"} · {columns.length} column{columns.length === 1 ? "" : "s"}</span>{rows.length > 0 && <button onClick={downloadCsv}>↓ Export CSV</button>}</div>
+    <div className="result-toolbar">
+      <span>{rows.length} row{rows.length === 1 ? "" : "s"} · {columns.length} column{columns.length === 1 ? "" : "s"}</span>
+      {(rows.length > 0 || Boolean(sql)) && (
+        <div className="result-export-actions">
+          {rows.length > 0 && (
+            <button type="button" onClick={handleDownloadCsv}>↓ Export CSV</button>
+          )}
+          <button type="button" onClick={handleDownloadPdf}>↓ Export PDF</button>
+        </div>
+      )}
+    </div>
     {rows.length ? <div className="table-wrap"><table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{columns.map((column) => <td key={column} className={row[column] === null ? "null" : ""}>{row[column] === null ? "NULL" : String(row[column])}</td>)}</tr>)}</tbody></table></div> : <div className="no-rows">The query completed successfully but returned no rows.</div>}
-    <div className="sql-heading"><span className="block-label">GENERATED SQL</span><button onClick={copySql} disabled={!sql}>{copied ? "Copied" : "Copy SQL"}</button></div>
+    <div className="sql-heading"><span className="block-label">GENERATED SQL</span><button type="button" onClick={copySql} disabled={!sql}>{copied ? "Copied" : "Copy SQL"}</button></div>
     <pre className="sql">{sql || "SQL was not returned by the API."}</pre>
     {result.execution_trace ? (
       <ExecutionTraceDrawer

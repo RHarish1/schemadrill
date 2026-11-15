@@ -28,11 +28,11 @@ flowchart TD
 | # | Feature | Status | Reality check against the code |
 | --- | --- | --- | --- |
 | 1 | **Google authentication** | **Shipped** | Neon Auth with Google, JWT verification, user record with email/display name capture, sign-out and session-expiry UX |
-| 2 | **Connect your Neon database** | **Phase 2a Shipped** | Session-held credentials via `X-DB-Url`, SSRF validation matrix, read-only check, exact schema vector store (`v0.6.0`). Phase 2b query execution pending |
+| 2 | **Connect your Neon database** | **Shipped** | Session-held credentials via `X-DB-Url`, SSRF validation matrix, read-only check, exact schema vector store, per-request user-DB execution (`v0.6.0`–`v0.6.7`) |
 | 3 | **BYOK (multi-provider)** | **Phase 1 Shipped** | Browser-held keys (`sessionStorage`), multi-model fallback, sticky routing, rate limiting (`v0.5.0`) |
-| 4 | **Run SQL through the website** | **Partly shipped** | Works on curated shared datasets. Remaining: run on the user's own database (Phase 2b) |
-| 5 | **Search interface and dataset selector** | **Mostly shipped** | Dropdown and examples exist. Remaining: list the user's own databases |
-| 6 | **CSV / PDF export** | Partly shipped | CSV export is in the frontend. PDF is not started |
+| 4 | **Run SQL through the website** | **Shipped** | Runs on curated shared datasets and user-connected Neon databases (`v0.6.0`), with `change_script` mode for mutations |
+| 5 | **Search interface and dataset selector** | **Shipped** | Combined Demo + Neon Connections dataset & schema selector (`v0.6.1`) |
+| 6 | **CSV / PDF export** | **Shipped** | Client-side CSV export with formula-injection protection + zero-dependency multi-page PDF 1.4 report export (`v0.7.0`) |
 | 7 | **CSV / Excel upload** | Planned | New tables first |
 
 ## Phases
@@ -75,11 +75,11 @@ User guide: [wiki/byok-keys.md](wiki/byok-keys.md).
 - [ ] Per-user and per-key usage tracking and rate limits.
 
 ### Phase 4: Query the user's database and export
-- [ ] Run the pipeline (retrieve, generate, guard, `EXPLAIN`, execute) against the user's connection.
-- [ ] Allowed tables derive from introspection. Keep the AST guard, read-only transaction, statement timeout, and row cap.
+- [x] Run the pipeline (retrieve, generate, guard, `EXPLAIN`, execute) against the user's connection.
+- [x] Allowed tables derive from introspection. Keep the AST guard, read-only transaction, statement timeout, and row cap.
 - [ ] Show generated SQL and results clearly. Editable SQL goes back through the guard.
-- [ ] **CSV export** (already in the frontend) with CSV formula-injection protection.
-- [ ] **PDF export** of results (server-side, with a row cap).
+- [x] **CSV export** (already in the frontend) with CSV formula-injection protection (`v0.7.0`).
+- [x] **PDF export** of results (client-side PDF 1.4 report with question, SQL, metadata, and row-capped paginated table, `v0.7.0`).
 
 ### Phase 5: Write path (CSV / Excel upload)
 Writes are an explicit upload feature. The LLM never generates data-changing statements.

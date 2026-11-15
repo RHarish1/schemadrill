@@ -108,6 +108,7 @@ kbd { padding: 2px 5px; border: 1px solid #324148; border-radius: 3px; color: #a
 .answer-heading h2 { margin: 10px 0 0; font: 500 21px "Space Grotesk"; }
 .attempts { padding: 6px 8px; border: 1px solid #2e403b; border-radius: 99px; }
 .result-toolbar { align-items: center; margin-bottom: 10px; color: #78888d; font: 10px "DM Mono"; }
+.result-export-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .table-wrap { overflow: auto; max-height: 280px; border: 1px solid #2b3a40; border-radius: 7px; }
 table { width: 100%; border-collapse: collapse; font: 11px "DM Mono"; text-align: left; }
 th, td { min-width: 110px; padding: 11px 13px; border-bottom: 1px solid #26343a; white-space: nowrap; }
